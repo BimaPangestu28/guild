@@ -2,137 +2,155 @@
 
 ---
 
-## Phase 1 — Foundation (Weeks 1-2)
+## Phase 0 — Dashboard UI (Done)
+
+### 0.1 React Dashboard + Pixel Art
+- [x] Setup React + Vite project di `dashboard/`
+- [x] Copy pixel art assets dari CraftPix guild hall pack
+- [x] Pre-render TMX tilemap ke PNG (interior + exterior)
+- [x] Sprite slicing pipeline (`scripts/slice-sprites.mjs`)
+- [x] AnimatedSprite component (CSS sprite animation)
+- [x] GuildScene — full game-like guild hall view with tilemap background
+- [x] HUD overlay (top stats bar, bottom nav)
+- [x] Game-style panels: HeroPanel, QuestPanel, ProjectPanel, MemoryPanel, LogPanel
+- [x] Mock data layer (`dashboard/src/data/mock.ts`)
+
+---
+
+## Phase 1 — Foundation (Done)
 
 ### 1.1 Rust Project Setup
-- [ ] `cargo init` — setup Rust project dengan binary target
-- [ ] Setup Cargo.toml dependencies: `clap` (CLI), `rusqlite` (SQLite), `serde`/`serde_json`, `uuid`, `chrono`
-- [ ] Setup `src/main.rs` sebagai CLI entrypoint dengan clap subcommands
-- [ ] Buat module structure: `db.rs`, `process_manager.rs`, `watcher.rs`, `ipc.rs`, `secrets.rs`
-- [ ] Test build di macOS dan Linux
+- [x] `cargo init` — setup Rust project dengan binary target
+- [x] Setup Cargo.toml dependencies: `clap`, `rusqlite`, `serde`/`serde_json`, `uuid`, `chrono`, `colored`, `dialoguer`
+- [x] Setup `src/main.rs` sebagai CLI entrypoint dengan clap subcommands
+- [x] Buat module structure: `db.rs`, `cli/mod.rs`, `cli/init.rs`, etc.
+- [x] Test build di Linux (WSL2)
 
 ### 1.2 SQLite Schema & Database Layer (`src/db.rs`)
-- [ ] Create `guild.db` on `guild init`
-- [ ] Table: `heroes` (id, name, class, status, level, xp, current_quest_id, session_pid, last_active)
-- [ ] Table: `projects` (id, name, display_name, path, repo_url, repo_provider, main_branch, dev_branch, language, status, default_mcps, created_at, last_active)
-- [ ] Table: `project_groups` (id, name, created_at)
-- [ ] Table: `project_group_members` (group_id, project_id)
-- [ ] Table: `quest_chains` (id, goal, project_id, status, created_at, completed_at)
-- [ ] Table: `quests` (id, chain_id, parent_quest_id, title, description, tier, type, status, project_id, branch, req_skills, assigned_to, result, created_at, completed_at)
-- [ ] Table: `hero_skills` (id, hero_id, name, type, proficiency, source, created_at, updated_at)
-- [ ] Table: `mcp_servers` (id, name, display_name, url, command, args, env_vars, skills_served, status, added_at)
-- [ ] Table: `hero_mcps` (hero_id, mcp_id, auto_attach, added_at)
-- [ ] Table: `file_locks` (file_path, quest_id, hero_id, locked_at)
-- [ ] Table: `memories` (id, owner, project_id, category, content, tags, created_by, updated_at)
-- [ ] Table: `activity_log` (id, timestamp, actor, action, quest_id, project_id, level)
+- [x] Create `guild.db` on `guild init`
+- [x] Table: `heroes` (id, name, class, status, level, xp, current_quest_id, session_pid, last_active)
+- [x] Table: `projects` (id, name, display_name, path, repo_url, repo_provider, main_branch, dev_branch, language, status, default_mcps, created_at, last_active)
+- [x] Table: `project_groups` (id, name, created_at)
+- [x] Table: `project_group_members` (group_id, project_id)
+- [x] Table: `quest_chains` (id, goal, project_id, status, created_at, completed_at)
+- [x] Table: `quests` (id, chain_id, parent_quest_id, title, description, tier, type, status, project_id, branch, req_skills, assigned_to, result, created_at, completed_at)
+- [x] Table: `hero_skills` (id, hero_id, name, type, proficiency, source, created_at, updated_at)
+- [x] Table: `mcp_servers` (id, name, display_name, url, command, args, env_vars, skills_served, status, added_at)
+- [x] Table: `hero_mcps` (hero_id, mcp_id, auto_attach, added_at)
+- [x] Table: `file_locks` (file_path, quest_id, hero_id, locked_at)
+- [x] Table: `memories` (id, owner, project_id, category, content, tags, created_by, updated_at)
+- [x] Table: `activity_log` (id, timestamp, actor, action, quest_id, project_id, level)
+- [x] `log_activity()` helper function
 - [ ] CRUD functions untuk setiap table
 - [ ] Hourly auto-backup logic (`~/.guild/backups/guild-{timestamp}.db`, retain 24)
 
 ### 1.3 Filesystem Structure
-- [ ] `guild init` creates `~/.guild/` root directory
-- [ ] Create `workspace/memory/shared/projects/`
-- [ ] Create `workspace/memory/shared/conventions/`
-- [ ] Create `workspace/memory/heroes/`
-- [ ] Create `workspace/quests/backlog/`, `workspace/quests/active/`, `workspace/quests/done/`
-- [ ] Create `workspace/projects/`
-- [ ] Create `workspace/inbox/`
-- [ ] Create `workspace/outbox/`
-- [ ] Create `workspace/heroes/`
-- [ ] Write default shared memory templates (conventions: `git.md`, `code-style.md`, `testing.md`)
+- [x] `guild init` creates `~/.guild/` root directory
+- [x] Create `workspace/memory/shared/projects/`
+- [x] Create `workspace/memory/shared/conventions/`
+- [x] Create `workspace/memory/heroes/`
+- [x] Create `workspace/quests/backlog/`, `workspace/quests/active/`, `workspace/quests/done/`
+- [x] Create `workspace/projects/`
+- [x] Create `workspace/inbox/`
+- [x] Create `workspace/outbox/`
+- [x] Create `workspace/heroes/`
+- [x] Write default shared memory templates (conventions: `git.md`, `code-style.md`, `testing.md`)
 
 ### 1.4 CLI — `guild init`
 - [ ] System requirements check: git 2.x, Python 3.11+
 - [ ] Prompt Anthropic API key, validate via API call
 - [ ] Store API key securely (encrypted local store)
-- [ ] Create directory structure (1.3)
-- [ ] Initialize SQLite database (1.2)
+- [x] Create directory structure (1.3)
+- [x] Initialize SQLite database (1.2)
 - [ ] Optional: Telegram setup prompt (store token + chat ID)
 - [ ] Optional: License key prompt (Free tier default)
 - [ ] Optional: Recruit first hero (interactive class selection, name input)
 - [ ] Optional: Register first project (`guild project add` flow)
-- [ ] Print summary dan next steps
+- [x] Print summary dan next steps
 
 ### 1.5 CLI — `guild project add`
-- [ ] Flag mode: `--path`, `--name`, `--provider`, `--main`, `--dev`
-- [ ] Interactive mode (wizard) kalau tanpa flags
-- [ ] Validate path exists dan is a git repo
-- [ ] Detect primary language dari file extensions
+- [x] Flag mode: `--path`, `--name`, `--provider`, `--main`, `--dev`
+- [x] Interactive mode (wizard) kalau tanpa flags
+- [x] Validate path exists dan is a git repo
+- [x] Detect primary language dari file extensions
 - [ ] Read existing conventions (.editorconfig, .eslintrc, etc.) ke shared memory
 - [ ] Check `dev_branch` exists — create from main kalau belum ada
-- [ ] Create shared memory template: `workspace/memory/shared/projects/{name}.md`
-- [ ] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
+- [x] Create shared memory template: `workspace/memory/shared/projects/{name}.md`
+- [x] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
 - [ ] Create project config summary: `workspace/projects/{name}/config.md`
-- [ ] Insert project record ke `guild.db`
+- [x] Insert project record ke `guild.db`
 - [ ] Scan TODOs/open issues — offer to create quests (optional)
 
 ### 1.6 CLI — `guild project` Subcommands
-- [ ] `guild project list` — list semua registered projects
-- [ ] `guild project show {name}` — detail project + config
+- [x] `guild project list` — list semua registered projects
+- [x] `guild project show {name}` — detail project + config
 - [ ] `guild project edit {name}` — interactive edit
-- [ ] `guild project pause {name}` — set status=paused, block new quests
-- [ ] `guild project resume {name}` — set status=active
-- [ ] `guild project archive {name}` — set status=archived, block active quests
-- [ ] `guild project unarchive {name}`
-- [ ] `guild project remove {name}` — confirm dialog, warn if active quests, delete from db (keep local files)
-- [ ] `guild project health {name}` — basic health report (placeholder, full impl Phase 5)
+- [x] `guild project pause {name}` — set status=paused, block new quests
+- [x] `guild project resume {name}` — set status=active
+- [x] `guild project archive {name}` — set status=archived, block active quests
+- [x] `guild project unarchive {name}`
+- [x] `guild project remove {name}` — confirm dialog, delete from db (keep local files)
+- [x] `guild project health {name}` — placeholder
 
 ### 1.7 CLI — `guild recruit` (Hero Creation)
-- [ ] Interactive wizard: pilih class (7 options), input name (atau random)
-- [ ] Flag mode: `--class "Rust Sorcerer" --name StormForge`
-- [ ] Insert hero record ke db (status=offline, level=1, xp=0)
-- [ ] Create hero memory directory: `workspace/memory/heroes/{name}/`
-- [ ] Create `CLAUDE.md`, `history.md`, `notes.md`, `skills/` di hero dir
-- [ ] Insert base skills ke `hero_skills` table berdasarkan class
-- [ ] Print session start command: `guild hero {name} --start`
+- [x] Interactive wizard: pilih class (7 options), input name
+- [x] Flag mode: `--class "Rust Sorcerer" --name StormForge`
+- [x] Insert hero record ke db (status=offline, level=1, xp=0)
+- [x] Create hero memory directory: `workspace/memory/heroes/{name}/`
+- [x] Create `CLAUDE.md`, `history.md`, `notes.md`, `skills/` di hero dir
+- [x] Insert base skills ke `hero_skills` table berdasarkan class
+- [x] Print session start command: `guild hero {name} --start`
 
 ### 1.8 CLI — `guild heroes` & Hero Management
-- [ ] `guild heroes` — roster overview (name, class, status, level, current quest)
-- [ ] `guild hero {name}` — hero detail + session command
-- [ ] `guild hero {name} --start` — generate session command (manual trigger Phase 1)
-- [ ] `guild retire {name}` — remove hero dari roster (confirm dialog)
-- [ ] `guild pause {name}` — pause hero session
-- [ ] `guild resume {name}` — resume hero session
+- [x] `guild heroes` — roster overview (name, class, status, level, current quest)
+- [x] `guild hero {name}` — hero detail + skills
+- [x] `guild hero {name} --start` — assemble CLAUDE.md + generate session command
+- [x] `guild retire {name}` — remove hero dari roster (confirm dialog)
+- [x] `guild pause {name}` — pause hero session
+- [x] `guild resume {name}` — resume hero session
 
 ### 1.9 CLI — `guild goal`
-- [ ] Accept goal string: `guild goal "description"`
-- [ ] Accept `--project {name}` flag untuk scoping
-- [ ] Write goal ke `workspace/inbox/guild-master.md`
+- [x] Accept goal string: `guild goal "description"`
+- [x] Accept `--project {name}` flag untuk scoping
+- [x] Write goal ke `workspace/inbox/guild-master.md`
 - [ ] Trigger Guild Master cycle (or print message kalau GM belum running)
 
 ### 1.10 CLI — `guild status`, `guild log`, `guild report`
-- [ ] `guild status` — full overview: heroes, active quests, backlog count, projects
-- [ ] `guild log` — recent activity_log entries dari db
-- [ ] `guild report` — latest Guild Master output dari `workspace/outbox/guild-master.md`
+- [x] `guild status` — full overview: heroes, active quests, backlog count, projects
+- [x] `guild log` — recent activity_log entries dari db
+- [x] `guild report` — latest Guild Master output dari `workspace/outbox/guild-master.md`
+- [x] `guild cost` — placeholder
 
 ### 1.11 CLI — Quest Management
-- [ ] `guild quests` — full quest board
-- [ ] `guild quests --project {name}` — filter by project
-- [ ] `guild quests --status {status}` — filter by status
-- [ ] `guild quest {id}` — quest detail
-- [ ] `guild quest add` — manual quest creation (interactive)
-- [ ] `guild assign {quest_id} {hero_name}` — manual assignment override
-- [ ] `guild complete {quest_id}` — mark done manually
-- [ ] `guild cancel {quest_id}` — cancel quest
+- [x] `guild quests` — full quest board
+- [x] `guild quests --project {name}` — filter by project
+- [x] `guild quests --status {status}` — filter by status
+- [x] `guild quest show {id}` — quest detail
+- [x] `guild quest add` — placeholder (manual quest creation)
+- [x] `guild assign {quest_id} {hero_name}` — manual assignment override
+- [x] `guild quest complete {quest_id}` — mark done manually
+- [x] `guild quest cancel {quest_id}` — cancel quest
 
 ### 1.12 Basic Guild Master Loop (Python)
-- [ ] Setup `agents/` Python directory dengan requirements
-- [ ] `agents/guild_master.py` — main orchestrator brain
-- [ ] Filesystem polling: watch `workspace/inbox/guild-master.md` untuk new goals
-- [ ] Filesystem polling: watch `workspace/outbox/*.md` untuk hero completion reports
-- [ ] Goal decomposition: parse goal → create quest chain + quests di db
-- [ ] Quest assignment: match quest req_skills ke hero base skills, pick best available
-- [ ] Write quest brief ke `workspace/inbox/{hero_name}.md`
-- [ ] Structured output ke `workspace/outbox/guild-master.md` (ANALYSIS, ACTIONS, ESCALATIONS, NEXT)
-- [ ] Activity logging ke db untuk setiap action
+- [x] Setup `agents/` Python directory dengan requirements
+- [x] `agents/guild_master.py` — main orchestrator brain
+- [x] Filesystem polling: watch `workspace/inbox/guild-master.md` untuk new goals
+- [x] Filesystem polling: watch `workspace/outbox/*.md` untuk hero completion reports
+- [x] Goal decomposition: parse goal → create quest chain + quests di db (via Claude API)
+- [x] Quest assignment: match quest req_skills ke hero skills
+- [x] Write quest brief ke `workspace/inbox/{hero_name}.md`
+- [x] Structured output ke `workspace/outbox/guild-master.md` (ANALYSIS, ACTIONS, ESCALATIONS, NEXT)
+- [x] Activity logging ke db untuk setiap action
+- [x] XP reward + level-up on quest completion
 - [ ] Enforce: Boss tier must be decomposed, never assigned directly
 - [ ] Enforce: max 4h estimated work per quest
 
 ### 1.13 Manual Hero Trigger
-- [ ] `guild hero {name} --start` generates Claude Code session command
-- [ ] Command includes path ke assembled `CLAUDE.md`
-- [ ] Command printed ke terminal + copied to clipboard
-- [ ] Developer manually runs di new terminal tab
-- [ ] Hero picks up quest dari `workspace/inbox/{name}.md`
+- [x] `guild hero {name} --start` generates Claude Code session command
+- [x] Command includes path ke assembled `CLAUDE.md`
+- [x] Command printed ke terminal
+- [ ] Copied to clipboard
+- [x] Hero picks up quest dari `workspace/inbox/{name}.md`
 
 ---
 
@@ -147,21 +165,21 @@
 - [ ] Memory file size check — warn kalau approaching 50KB
 
 ### 2.2 Dynamic CLAUDE.md Generation
-- [ ] Assemble dari 4 sources: hero identity, quest context, personal context, project context
-- [ ] Hero identity section: class, skills, focus area, guild rules
-- [ ] Current quest section: ID, objective, branch, project, chain role
-- [ ] Personal context: notes.md + last 5 history entries
+- [x] Assemble dari 4 sources: hero identity, quest context, personal context, project context
+- [x] Hero identity section: class, skills, focus area, guild rules
+- [x] Current quest section: ID, objective, branch, project, chain role
+- [x] Personal context: notes.md
 - [ ] Project context: shared/projects/{project}.md relevant section
 - [ ] Skill context: relevant skill backing files matching project
-- [ ] Memory update protocol instructions (outbox format, what goes where)
-- [ ] Guild rules (commit format, branch rules, never push to main)
-- [ ] Write assembled CLAUDE.md ke `workspace/memory/heroes/{name}/CLAUDE.md`
+- [x] Memory update protocol instructions (outbox format, what goes where)
+- [x] Guild rules (commit format, branch rules, never push to main)
+- [x] Write assembled CLAUDE.md ke `workspace/memory/heroes/{name}/CLAUDE.md`
 
 ### 2.3 Hero Memory Update Protocol
-- [ ] Hero writes outbox format: status, summary, files_changed, learnings, blockers
-- [ ] Guild Master reads outbox → processes learnings
+- [x] Hero writes outbox format: status, summary, files_changed, learnings, blockers
+- [x] Guild Master reads outbox → processes learnings
 - [ ] Route learnings: architectural → ADR, project-wide → shared memory, personal → notes.md
-- [ ] Update hero history.md dengan quest completion entry
+- [x] Update hero history.md dengan quest completion entry
 - [ ] Clear current quest section dari hero CLAUDE.md
 
 ### 2.4 Shared Memory Accumulation
@@ -178,7 +196,7 @@
 - [ ] Log summarization event
 
 ### 2.6 Skill System
-- [ ] Base skills defined per hero class (from appendix)
+- [x] Base skills defined per hero class (from appendix)
 - [ ] `guild skill list {hero}` — list all skills
 - [ ] `guild skill show {hero} {skill}` — skill detail
 - [ ] `guild skill add {hero} {skill}` — manual skill add (type=manual)
@@ -430,21 +448,23 @@
 
 ---
 
-## Phase 6 — Dashboard + Launch (Week 8)
+## Phase 6 — Dashboard Integration + Launch (Week 8)
 
-### 6.1 React Dashboard Setup
-- [ ] Setup React project di `dashboard/`
+### 6.1 Dashboard API Layer
+- [x] Setup React project di `dashboard/`
 - [ ] Bundle into Rust binary at build time (no Node.js required on user machine)
 - [ ] `guild dashboard` → serve di localhost:7432
 - [ ] API layer: Rust serves JSON endpoints dari guild.db
+- [ ] Replace mock data with real API calls
 
 ### 6.2 Dashboard Components
-- [ ] `GuildHall.tsx` — main overview (heroes, quests summary, activity)
-- [ ] `QuestBoard.tsx` — quest list with filters (project, status, tier)
-- [ ] `HeroRoster.tsx` — hero cards (status, level, skills, current quest)
-- [ ] `MemoryViewer.tsx` — browse shared/private memory, ADRs
-- [ ] Activity log view — recent actions, filterable
-- [ ] Project management — register, pause, archive via UI
+- [x] `GuildScene.tsx` — main game-like guild hall view with animated sprites
+- [x] `QuestPanel.tsx` — quest list panel
+- [x] `HeroPanel.tsx` — hero roster panel with status/level/skills
+- [x] `MemoryPanel.tsx` — memory browser panel
+- [x] `LogPanel.tsx` — activity log panel
+- [x] `ProjectPanel.tsx` — project panel
+- [ ] Wire all panels to real API data
 
 ### 6.3 Real-Time Updates
 - [ ] Polling atau WebSocket untuk live hero status
