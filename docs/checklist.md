@@ -1,0 +1,500 @@
+# Guild — Build Checklist
+
+---
+
+## Phase 1 — Foundation (Weeks 1-2)
+
+### 1.1 Rust Project Setup
+- [ ] `cargo init` — setup Rust project dengan binary target
+- [ ] Setup Cargo.toml dependencies: `clap` (CLI), `rusqlite` (SQLite), `serde`/`serde_json`, `uuid`, `chrono`
+- [ ] Setup `src/main.rs` sebagai CLI entrypoint dengan clap subcommands
+- [ ] Buat module structure: `db.rs`, `process_manager.rs`, `watcher.rs`, `ipc.rs`, `secrets.rs`
+- [ ] Test build di macOS dan Linux
+
+### 1.2 SQLite Schema & Database Layer (`src/db.rs`)
+- [ ] Create `guild.db` on `guild init`
+- [ ] Table: `heroes` (id, name, class, status, level, xp, current_quest_id, session_pid, last_active)
+- [ ] Table: `projects` (id, name, display_name, path, repo_url, repo_provider, main_branch, dev_branch, language, status, default_mcps, created_at, last_active)
+- [ ] Table: `project_groups` (id, name, created_at)
+- [ ] Table: `project_group_members` (group_id, project_id)
+- [ ] Table: `quest_chains` (id, goal, project_id, status, created_at, completed_at)
+- [ ] Table: `quests` (id, chain_id, parent_quest_id, title, description, tier, type, status, project_id, branch, req_skills, assigned_to, result, created_at, completed_at)
+- [ ] Table: `hero_skills` (id, hero_id, name, type, proficiency, source, created_at, updated_at)
+- [ ] Table: `mcp_servers` (id, name, display_name, url, command, args, env_vars, skills_served, status, added_at)
+- [ ] Table: `hero_mcps` (hero_id, mcp_id, auto_attach, added_at)
+- [ ] Table: `file_locks` (file_path, quest_id, hero_id, locked_at)
+- [ ] Table: `memories` (id, owner, project_id, category, content, tags, created_by, updated_at)
+- [ ] Table: `activity_log` (id, timestamp, actor, action, quest_id, project_id, level)
+- [ ] CRUD functions untuk setiap table
+- [ ] Hourly auto-backup logic (`~/.guild/backups/guild-{timestamp}.db`, retain 24)
+
+### 1.3 Filesystem Structure
+- [ ] `guild init` creates `~/.guild/` root directory
+- [ ] Create `workspace/memory/shared/projects/`
+- [ ] Create `workspace/memory/shared/conventions/`
+- [ ] Create `workspace/memory/heroes/`
+- [ ] Create `workspace/quests/backlog/`, `workspace/quests/active/`, `workspace/quests/done/`
+- [ ] Create `workspace/projects/`
+- [ ] Create `workspace/inbox/`
+- [ ] Create `workspace/outbox/`
+- [ ] Create `workspace/heroes/`
+- [ ] Write default shared memory templates (conventions: `git.md`, `code-style.md`, `testing.md`)
+
+### 1.4 CLI — `guild init`
+- [ ] System requirements check: git 2.x, Python 3.11+
+- [ ] Prompt Anthropic API key, validate via API call
+- [ ] Store API key securely (encrypted local store)
+- [ ] Create directory structure (1.3)
+- [ ] Initialize SQLite database (1.2)
+- [ ] Optional: Telegram setup prompt (store token + chat ID)
+- [ ] Optional: License key prompt (Free tier default)
+- [ ] Optional: Recruit first hero (interactive class selection, name input)
+- [ ] Optional: Register first project (`guild project add` flow)
+- [ ] Print summary dan next steps
+
+### 1.5 CLI — `guild project add`
+- [ ] Flag mode: `--path`, `--name`, `--provider`, `--main`, `--dev`
+- [ ] Interactive mode (wizard) kalau tanpa flags
+- [ ] Validate path exists dan is a git repo
+- [ ] Detect primary language dari file extensions
+- [ ] Read existing conventions (.editorconfig, .eslintrc, etc.) ke shared memory
+- [ ] Check `dev_branch` exists — create from main kalau belum ada
+- [ ] Create shared memory template: `workspace/memory/shared/projects/{name}.md`
+- [ ] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
+- [ ] Create project config summary: `workspace/projects/{name}/config.md`
+- [ ] Insert project record ke `guild.db`
+- [ ] Scan TODOs/open issues — offer to create quests (optional)
+
+### 1.6 CLI — `guild project` Subcommands
+- [ ] `guild project list` — list semua registered projects
+- [ ] `guild project show {name}` — detail project + config
+- [ ] `guild project edit {name}` — interactive edit
+- [ ] `guild project pause {name}` — set status=paused, block new quests
+- [ ] `guild project resume {name}` — set status=active
+- [ ] `guild project archive {name}` — set status=archived, block active quests
+- [ ] `guild project unarchive {name}`
+- [ ] `guild project remove {name}` — confirm dialog, warn if active quests, delete from db (keep local files)
+- [ ] `guild project health {name}` — basic health report (placeholder, full impl Phase 5)
+
+### 1.7 CLI — `guild recruit` (Hero Creation)
+- [ ] Interactive wizard: pilih class (7 options), input name (atau random)
+- [ ] Flag mode: `--class "Rust Sorcerer" --name StormForge`
+- [ ] Insert hero record ke db (status=offline, level=1, xp=0)
+- [ ] Create hero memory directory: `workspace/memory/heroes/{name}/`
+- [ ] Create `CLAUDE.md`, `history.md`, `notes.md`, `skills/` di hero dir
+- [ ] Insert base skills ke `hero_skills` table berdasarkan class
+- [ ] Print session start command: `guild hero {name} --start`
+
+### 1.8 CLI — `guild heroes` & Hero Management
+- [ ] `guild heroes` — roster overview (name, class, status, level, current quest)
+- [ ] `guild hero {name}` — hero detail + session command
+- [ ] `guild hero {name} --start` — generate session command (manual trigger Phase 1)
+- [ ] `guild retire {name}` — remove hero dari roster (confirm dialog)
+- [ ] `guild pause {name}` — pause hero session
+- [ ] `guild resume {name}` — resume hero session
+
+### 1.9 CLI — `guild goal`
+- [ ] Accept goal string: `guild goal "description"`
+- [ ] Accept `--project {name}` flag untuk scoping
+- [ ] Write goal ke `workspace/inbox/guild-master.md`
+- [ ] Trigger Guild Master cycle (or print message kalau GM belum running)
+
+### 1.10 CLI — `guild status`, `guild log`, `guild report`
+- [ ] `guild status` — full overview: heroes, active quests, backlog count, projects
+- [ ] `guild log` — recent activity_log entries dari db
+- [ ] `guild report` — latest Guild Master output dari `workspace/outbox/guild-master.md`
+
+### 1.11 CLI — Quest Management
+- [ ] `guild quests` — full quest board
+- [ ] `guild quests --project {name}` — filter by project
+- [ ] `guild quests --status {status}` — filter by status
+- [ ] `guild quest {id}` — quest detail
+- [ ] `guild quest add` — manual quest creation (interactive)
+- [ ] `guild assign {quest_id} {hero_name}` — manual assignment override
+- [ ] `guild complete {quest_id}` — mark done manually
+- [ ] `guild cancel {quest_id}` — cancel quest
+
+### 1.12 Basic Guild Master Loop (Python)
+- [ ] Setup `agents/` Python directory dengan requirements
+- [ ] `agents/guild_master.py` — main orchestrator brain
+- [ ] Filesystem polling: watch `workspace/inbox/guild-master.md` untuk new goals
+- [ ] Filesystem polling: watch `workspace/outbox/*.md` untuk hero completion reports
+- [ ] Goal decomposition: parse goal → create quest chain + quests di db
+- [ ] Quest assignment: match quest req_skills ke hero base skills, pick best available
+- [ ] Write quest brief ke `workspace/inbox/{hero_name}.md`
+- [ ] Structured output ke `workspace/outbox/guild-master.md` (ANALYSIS, ACTIONS, ESCALATIONS, NEXT)
+- [ ] Activity logging ke db untuk setiap action
+- [ ] Enforce: Boss tier must be decomposed, never assigned directly
+- [ ] Enforce: max 4h estimated work per quest
+
+### 1.13 Manual Hero Trigger
+- [ ] `guild hero {name} --start` generates Claude Code session command
+- [ ] Command includes path ke assembled `CLAUDE.md`
+- [ ] Command printed ke terminal + copied to clipboard
+- [ ] Developer manually runs di new terminal tab
+- [ ] Hero picks up quest dari `workspace/inbox/{name}.md`
+
+---
+
+## Phase 2 — Memory & Skills (Week 3)
+
+### 2.1 Memory Manager (`agents/memory_manager.py`)
+- [ ] Read shared memory: `workspace/memory/shared/projects/{name}.md`
+- [ ] Read hero private memory: `workspace/memory/heroes/{name}/notes.md`
+- [ ] Read hero history: `workspace/memory/heroes/{name}/history.md`
+- [ ] Read hero skills: `workspace/memory/heroes/{name}/skills/{skill}.md`
+- [ ] Write ke semua memory locations
+- [ ] Memory file size check — warn kalau approaching 50KB
+
+### 2.2 Dynamic CLAUDE.md Generation
+- [ ] Assemble dari 4 sources: hero identity, quest context, personal context, project context
+- [ ] Hero identity section: class, skills, focus area, guild rules
+- [ ] Current quest section: ID, objective, branch, project, chain role
+- [ ] Personal context: notes.md + last 5 history entries
+- [ ] Project context: shared/projects/{project}.md relevant section
+- [ ] Skill context: relevant skill backing files matching project
+- [ ] Memory update protocol instructions (outbox format, what goes where)
+- [ ] Guild rules (commit format, branch rules, never push to main)
+- [ ] Write assembled CLAUDE.md ke `workspace/memory/heroes/{name}/CLAUDE.md`
+
+### 2.3 Hero Memory Update Protocol
+- [ ] Hero writes outbox format: status, summary, files_changed, learnings, blockers
+- [ ] Guild Master reads outbox → processes learnings
+- [ ] Route learnings: architectural → ADR, project-wide → shared memory, personal → notes.md
+- [ ] Update hero history.md dengan quest completion entry
+- [ ] Clear current quest section dari hero CLAUDE.md
+
+### 2.4 Shared Memory Accumulation
+- [ ] Guild Master checks hero outbox learnings field
+- [ ] Append project-relevant learnings ke `shared/projects/{project}.md`
+- [ ] Detect conflicts dengan existing shared memory (Section 10 Scenario C)
+- [ ] Create ADR untuk architectural decisions (`shared/projects/{name}-adr/adr-NNN.md`)
+- [ ] No duplicate information — check before writing
+
+### 2.5 Auto-Summarization
+- [ ] Detect memory file > 50KB
+- [ ] Archive current content ke `workspace/memory/heroes/{name}/archive/{date}-notes.md`
+- [ ] Summarize ke condensed version
+- [ ] Log summarization event
+
+### 2.6 Skill System
+- [ ] Base skills defined per hero class (from appendix)
+- [ ] `guild skill list {hero}` — list all skills
+- [ ] `guild skill show {hero} {skill}` — skill detail
+- [ ] `guild skill add {hero} {skill}` — manual skill add (type=manual)
+- [ ] `guild skill remove {hero} {skill}`
+- [ ] `guild skill edit {hero} {skill}` — open in $EDITOR
+- [ ] `guild skill transfer {from_hero} {to_hero} {skill}` — copy skill backing file
+- [ ] Skill backing files: create `workspace/memory/heroes/{name}/skills/{skill}.md`
+
+### 2.7 Proficiency Tracking
+- [ ] Track quest count per domain/project per hero
+- [ ] Auto-update proficiency: 1-2 quests=1, 3-5=2, 6-10=3, 11-20=4, 21+=5
+- [ ] Update proficiency on quest completion
+- [ ] At proficiency >= 4: extract key learnings ke shared memory
+
+### 2.8 Memory CLI Commands
+- [ ] `guild memory` — shared memory index
+- [ ] `guild memory --project {name}` — project-specific memory
+- [ ] `guild memory --hero {name}` — hero private memory
+- [ ] `guild memory --project {name} --adr {number}` — view specific ADR
+- [ ] `guild memory edit --project {name}` — edit in $EDITOR
+- [ ] `guild memory edit --hero {name} --file notes`
+- [ ] `guild memory clear --hero {name} --private` — clear private memory
+- [ ] `guild memory export --output {path}` — export all memory
+- [ ] `guild memory import {path}` — import memory
+
+---
+
+## Phase 3 — Autonomous Trigger (Weeks 4-5)
+
+### 3.1 Claude Code SDK Integration (`agents/hero_runtime.py`)
+- [ ] Python wrapper untuk Claude Code SDK
+- [ ] Start session dengan injected CLAUDE.md
+- [ ] Pass MCP config path ke session
+- [ ] Capture session PID
+- [ ] Monitor session output (stdout/stderr)
+
+### 3.2 Rust Process Manager (`src/process_manager.rs`)
+- [ ] Spawn hero sessions (Python → Claude Code SDK)
+- [ ] Store PID di guild.db (`hero.session_pid`)
+- [ ] Heartbeat check every 60s — detect dead PIDs
+- [ ] SIGTERM untuk `guild pause {name}`
+- [ ] Re-spawn untuk `guild resume {name}`
+- [ ] Max 3 restart retries per quest — then mark blocked
+
+### 3.3 Guild Master Autonomous Loop
+- [ ] Continuous polling loop (configurable interval)
+- [ ] On goal received → decompose, assign, spawn hero automatically
+- [ ] On quest completion → spawn next chain quest automatically
+- [ ] On hero idle → check backlog, auto-assign matching quest
+- [ ] On hero blocked (1st time) → attempt resolve via shared memory/ADRs
+- [ ] On hero blocked (2nd time) → decompose quest into smaller units
+- [ ] On hero blocked (needs credentials/arch decision) → escalate immediately
+
+### 3.4 Quest Chain Automation
+- [ ] Implementation complete → auto-create test quest (different hero)
+- [ ] Test pass → auto-create PR → auto-create review quest (third hero)
+- [ ] Review approved → auto-merge to development → notify developer
+- [ ] Review changes requested → create address-review quest → back to implementor
+- [ ] Chain rule enforcement: no hero holds two roles in same chain
+
+### 3.5 Session Crash Recovery
+- [ ] Detect dead PID via heartbeat
+- [ ] Set hero status=offline, clear session_pid
+- [ ] Check: recent commits exist? → re-spawn with recovery context block
+- [ ] Check: no commits? → reset quest to backlog, re-spawn hero
+- [ ] Recovery CLAUDE.md block: last known action, last commit, quest status
+- [ ] Notify developer via Telegram Level 3 kalau quest was active
+
+### 3.6 Rate Limit Handling
+- [ ] Detect no output > 5 minutes
+- [ ] If rate limit: hero status=resting, schedule re-activation after cooldown
+- [ ] If other cause: treat as crash recovery
+- [ ] Log event, no Telegram (routine)
+
+### 3.7 Auto-Skill Learning
+- [ ] On quest completion: check if project-related skill exists
+- [ ] Exists → increment proficiency based on quest count
+- [ ] Not exists → create new learned skill (proficiency=1)
+- [ ] Parse outbox for new patterns/gotchas → append ke skill backing file
+- [ ] At proficiency >= 4 → extract ke shared memory
+
+### 3.8 Cost Tracking
+- [ ] Track token usage per hero session
+- [ ] Track token usage per quest
+- [ ] Track token usage per project
+- [ ] `guild cost` CLI command — today's breakdown
+- [ ] Configurable daily cap: `guild config --set cost-cap-daily {amount}`
+- [ ] Warning at 80% cap → Telegram notification
+- [ ] Auto-pause all heroes at 100% cap
+
+### 3.9 Circuit Breaker
+- [ ] Detect stuck hero: no output + no commits > configurable threshold
+- [ ] Detect looping hero: same error pattern repeated > 3x
+- [ ] Max tokens per quest — terminate session kalau exceeded
+- [ ] Dead-man timer per quest — escalate kalau exceeded
+- [ ] Kill and restart on stuck detection
+
+---
+
+## Phase 4 — Git Workflow (Week 6)
+
+### 4.1 Automated Branch Management
+- [ ] On quest creation: generate branch name `{type}/GLD-{id}-{slug}`
+- [ ] On quest start: create branch from `development` (never from `main`)
+- [ ] On quest complete + merge: delete merged branch
+- [ ] Handle: branch already exists → reuse if same quest, append `-v2` if different
+
+### 4.2 PR Automation
+- [ ] On test quest pass: auto-create PR from feature branch → `development`
+- [ ] PR body auto-generated: quest description, test results, changed files, learnings
+- [ ] PR template format per docs (Section 04)
+- [ ] GitHub API integration via `gh` or API
+- [ ] GitLab API integration
+- [ ] Provider=none: notify developer with manual merge command
+
+### 4.3 Quest Chain Enforcement
+- [ ] After impl complete → auto-spawn test quest (assign different hero)
+- [ ] After test pass → create PR → auto-spawn review quest (third hero)
+- [ ] After review approved → auto-merge PR to `development`
+- [ ] After review changes requested → create fix quest → assign back to implementor
+- [ ] Common quests (<1hr, low risk) may skip test/review — log this decision
+- [ ] Enforce chain rule: no hero holds two roles in same chain
+
+### 4.4 Branch Protection Setup
+- [ ] On `guild project add`: configure branch protection rules via provider API
+- [ ] `main`: no direct push, human approval required
+- [ ] `development`: no direct push, hero reviewer + tests required
+- [ ] Feature/fix/chore branches: heroes push freely, cannot self-merge
+- [ ] Handle: branch protection setup fails → log warning, remind developer
+
+### 4.5 Development → Main Merge
+- [ ] Guild Master monitors `development` branch
+- [ ] When ready: send Telegram merge approval request
+- [ ] Wait for `/approve {chain_id}` dari developer
+- [ ] On approve: create PR development → main, merge
+- [ ] On reject: keep on development, log reason
+
+### 4.6 Multi-Repo Project Groups
+- [ ] `guild project group create {name}`
+- [ ] `guild project group add {name} {path}`
+- [ ] `guild project group list`
+- [ ] `guild project group show {name}`
+- [ ] Cross-repo quest chains: each repo gets own branch/PR, linked under one chain ID
+- [ ] Shared memory across repos in group
+
+### 4.7 Commit Convention Enforcement
+- [ ] Heroes follow: `[GLD-{id}] {short description} — {hero_name}`
+- [ ] Guild Master validates commit messages dari hero sessions
+- [ ] WIP commit on pause: `[GLD-{id}] WIP — paused by developer — {hero_name}`
+
+### 4.8 File-Level Locking
+- [ ] Before quest assignment: parse description, identify likely files
+- [ ] Check `file_locks` table for conflicts
+- [ ] If conflict: queue quest until lock released
+- [ ] On quest completion/cancel: release all locks
+- [ ] Auto-activate queued quests when lock released
+
+---
+
+## Phase 5 — MCP + Proactive + Notifications (Week 7)
+
+### 5.1 MCP Registry
+- [ ] `guild mcp add --name {name} --url {url}` — URL-type MCP
+- [ ] `guild mcp add --name {name} --command {cmd} --args {args}` — process-type MCP
+- [ ] `guild mcp remove {name}`
+- [ ] `guild mcp list` — all registered MCPs
+- [ ] `guild mcp status` — which heroes have which MCPs
+- [ ] Skills-served mapping per MCP
+
+### 5.2 MCP Auto-Attach Logic (`agents/mcp_builder.py`)
+- [ ] Always attach: filesystem, git (built-in)
+- [ ] Permanent: hero_mcps WHERE auto_attach=true
+- [ ] Quest-based: MCPs WHERE skills_served overlaps quest.req_skills
+- [ ] Project default: project.default_mcps
+- [ ] Generate `workspace/heroes/{name}/mcp-config.json` at session start
+- [ ] Resolve secrets at generation time (never write plaintext to disk)
+
+### 5.3 MCP Hero/Project Attachment
+- [ ] `guild mcp attach {hero} {mcp} --auto` — permanent attach ke hero
+- [ ] `guild mcp detach {hero} {mcp}`
+- [ ] `guild mcp attach --project {name} {mcp}` — project default
+- [ ] `guild mcp detach --project {name} {mcp}`
+- [ ] `guild project mcp add {project} {mcp}` (alias)
+- [ ] `guild project mcp remove {project} {mcp}` (alias)
+- [ ] `guild project mcp list {project}` (alias)
+
+### 5.4 MCP Failure Handling
+- [ ] Required MCP unreachable → abort session start, mark quest blocked, notify
+- [ ] Optional MCP unreachable → start without it, log warning
+- [ ] MCP crash mid-session → hero continues, logs warning, reports in outbox
+
+### 5.5 Secrets Management (`src/secrets.rs`)
+- [ ] `guild secret add {name} {value}` — encrypt dan store
+- [ ] `guild secret list` — show names only, never values
+- [ ] `guild secret remove {name}`
+- [ ] Encryption key derived dari machine ID + user home directory
+- [ ] Secrets resolved at MCP config generation time
+
+### 5.6 Telegram Bot Integration
+- [ ] `guild setup telegram` — interactive wizard
+- [ ] Create bot via @BotFather instructions
+- [ ] Store bot token dan chat ID
+- [ ] Polling mode (long polling every 10s) — default
+- [ ] Optional webhook mode
+
+### 5.7 Telegram Inbound Commands
+- [ ] `/status` — hero roster + active quests
+- [ ] `/report` — latest Guild Master analysis
+- [ ] `/heroes` — roster with status/level
+- [ ] `/quests` — quest board
+- [ ] `/pause` — pause all heroes
+- [ ] `/resume` — resume all heroes
+- [ ] `/approve {chain_id}` — approve dev→main merge
+- [ ] `/reject {chain_id}` — reject merge
+- [ ] `/goal {text}` — post new goal
+- [ ] `/cost` — today's usage breakdown
+- [ ] `/help` — list commands
+- [ ] Natural language parsing (non-prefixed messages)
+- [ ] Ambiguous input (confidence <60%) → ask clarification, don't execute
+
+### 5.8 Telegram Outbound Notifications
+- [ ] Level 1 (Silent): log only — routine assignments, minor decisions
+- [ ] Level 2 (Dashboard): quest completions, hero level-ups
+- [ ] Level 3 (Telegram message): blockers, daily briefing, anomalies
+- [ ] Level 4 (Telegram urgent): critical failures, cost overrun, requires decision
+- [ ] Quest completion format
+- [ ] Merge approval request format
+- [ ] Cost warning format
+- [ ] Escalation format (problem, options, A/B choice)
+- [ ] Conversation context: store last 10 messages, clear daily
+
+### 5.9 Telegram Daily Briefing
+- [ ] Configurable time: `guild config --set daily-briefing-time {HH:MM}`
+- [ ] Content: active quests, hero availability, priorities, blockers
+- [ ] Max 200 words
+
+### 5.10 Proactive Behaviors
+- [ ] Idle hero check: hero → idle → check backlog → auto-assign if match
+- [ ] On code push: test coverage delta, lint errors, TODO additions
+- [ ] Weekly codebase health scan per active project
+- [ ] Auto-create chore quests above threshold (outdated deps, coverage drop, etc.)
+- [ ] PR idle > 24h: re-ping reviewer or reassign
+
+### 5.11 Notification Level Configuration
+- [ ] `guild config telegram` — adjust notification levels
+- [ ] Per-event level customization
+- [ ] Telegram API unreachable → queue notifications, retry every 5 min
+- [ ] Bot token invalid → disable Telegram, fallback to dashboard-only
+
+---
+
+## Phase 6 — Dashboard + Launch (Week 8)
+
+### 6.1 React Dashboard Setup
+- [ ] Setup React project di `dashboard/`
+- [ ] Bundle into Rust binary at build time (no Node.js required on user machine)
+- [ ] `guild dashboard` → serve di localhost:7432
+- [ ] API layer: Rust serves JSON endpoints dari guild.db
+
+### 6.2 Dashboard Components
+- [ ] `GuildHall.tsx` — main overview (heroes, quests summary, activity)
+- [ ] `QuestBoard.tsx` — quest list with filters (project, status, tier)
+- [ ] `HeroRoster.tsx` — hero cards (status, level, skills, current quest)
+- [ ] `MemoryViewer.tsx` — browse shared/private memory, ADRs
+- [ ] Activity log view — recent actions, filterable
+- [ ] Project management — register, pause, archive via UI
+
+### 6.3 Real-Time Updates
+- [ ] Polling atau WebSocket untuk live hero status
+- [ ] Quest status changes reflected in real-time
+- [ ] Activity log auto-refresh
+- [ ] Queued Telegram notifications visible in dashboard
+
+### 6.4 License System
+- [ ] Offline license key verification algorithm
+- [ ] Free tier: 2 heroes max, no shared memory, no dashboard, no Telegram, no proactive
+- [ ] Pro tier: 8 heroes, full features
+- [ ] License stored locally, works offline after activation
+- [ ] Enforce limits at hero creation dan feature access
+
+### 6.5 Onboarding Polish
+- [ ] Rookie period (first 7 days): more conservative GM, more frequent updates
+- [ ] "Why I did this" explanations on every autonomous action during rookie
+- [ ] Suggest when to recruit 2nd/3rd hero
+- [ ] `guild config --skip-rookie` to disable
+- [ ] Smooth `guild init` flow dengan clear progress steps [1/6] through [6/6]
+
+### 6.6 Documentation & Launch
+- [ ] README.md — project overview, installation, quickstart
+- [ ] Contributing guide (if open source)
+- [ ] Show HN post draft
+- [ ] Launch assets (screenshots, demo GIF)
+
+---
+
+## Cross-Cutting (All Phases)
+
+### Error Handling
+- [ ] FATAL: guild stops entirely, manual intervention required
+- [ ] CRITICAL: affected component pauses, Telegram Level 4 notification
+- [ ] WARNING: guild continues, logged, included in daily report
+- [ ] INFO: guild continues, logged only
+- [ ] Guild Master crash → auto-restart after 30s, re-read state from db
+- [ ] Guild Master stuck >10 min → kill and restart
+- [ ] guild.db corruption → stop, notify, restore from hourly backup
+- [ ] Hero modifies file outside project scope → revert via git, suspend hero
+- [ ] Hero attempts push to main → block (branch protection), suspend, notify
+
+### Testing
+- [ ] Rust unit tests untuk db layer, process manager, CLI parsing
+- [ ] Python unit tests untuk guild_master, memory_manager, mcp_builder
+- [ ] Integration tests: goal → quest chain → hero assignment flow
+- [ ] Test on both macOS dan Linux dari Phase 1
+
+### Backup & Recovery
+- [ ] `guild.db` auto-backup every hour ke `~/.guild/backups/`
+- [ ] Retain last 24 backups
+- [ ] `guild backup list`
+- [ ] `guild backup restore {filename}`

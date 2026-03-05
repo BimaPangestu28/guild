@@ -1,0 +1,90 @@
+[
+  {
+    "name": "citizen1",
+    "file": "citizen1-idle.png",
+    "frames": 12,
+    "frameWidth": 96,
+    "frameHeight": 96,
+    "originalFrameSize": "32x32"
+  },
+  {
+    "name": "citizen2",
+    "file": "citizen2-idle.png",
+    "frames": 12,
+    "frameWidth": 96,
+    "frameHeight": 96,
+    "originalFrameSize": "32x32"
+  },
+  {
+    "name": "fighter2",
+    "file": "fighter2-idle.png",
+    "frames": 12,
+    "frameWidth": 96,
+    "frameHeight": 96,
+    "originalFrameSize": "32x32"
+  },
+  {
+    "name": "mage1",
+    "file": "mage1-idle.png",
+    "frames": 3,
+    "frameWidth": 192,
+    "frameHeight": 156,
+    "originalFrameSize": "64x52"
+  },
+  {
+    "name": "mage2",
+    "file": "mage2-idle.png",
+    "frames": 3,
+    "frameWidth": 192,
+    "frameHeight": 156,
+    "originalFrameSize": "64x52"
+  },
+  {
+    "name": "mage3",
+    "file": "mage3-idle.png",
+    "frames": 3,
+    "frameWidth": 192,
+    "frameHeight": 156,
+    "originalFrameSize": "64x52"
+  },
+  {
+    "name": "mage4",
+    "file": "mage4-idle.png",
+    "frames": 3,
+    "frameWidth": 192,
+    "frameHeight": 156,
+    "originalFrameSize": "64x52"
+  },
+  {
+    "name": "fighter-sword",
+    "file": "fighter-sword-idle.png",
+    "frames": 3,
+    "frameWidth": 192,
+    "frameHeight": 192,
+    "originalFrameSize": "64x64"
+  },
+  {
+    "name": "guildmaster",
+    "file": "guildmaster-idle.png",
+    "frames": 6,
+    "frameWidth": 144,
+    "frameHeight": 96,
+    "originalFrameSize": "48x32"
+  },
+  {
+    "name": "reader1",
+    "file": "reader1-idle.png",
+    "frames": 11,
+    "frameWidth": 96,
+    "frameHeight": 144,
+    "originalFrameSize": "32x48"
+  },
+  {
+    "name": "fire",
+    "file": "fire-idle.png",
+    "frames": 3,
+    "frameWidth": 144,
+    "frameHeight": 144,
+    "originalFrameSize": "48x48"
+  }
+]
