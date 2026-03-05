@@ -17,6 +17,8 @@ from pathlib import Path
 
 import anthropic
 
+from memory_manager import route_learnings, update_proficiency
+
 
 GUILD_DIR = Path.home() / ".guild"
 DB_PATH = GUILD_DIR / "guild.db"
@@ -332,6 +334,28 @@ def process_hero_report(conn, hero_name, content):
 
         log_activity(conn, hero_name, f"Quest {quest_id} completed (+{xp} XP)", quest_id=quest_id)
         print(f"  ✓ {hero_name}: quest {quest_id} completed (+{xp} XP)")
+
+        # Resolve project name for memory operations
+        quest_detail = conn.execute("SELECT project_id FROM quests WHERE id = ?", (quest_id,)).fetchone()
+        project_name = None
+        if quest_detail and quest_detail["project_id"]:
+            project_row = conn.execute(
+                "SELECT name FROM projects WHERE id = ?", (quest_detail["project_id"],)
+            ).fetchone()
+            if project_row:
+                project_name = project_row["name"]
+
+        # Route learnings from report if present
+        if project_name:
+            learnings_match = re.search(r"(?:Learnings|Notes|Insights):\s*\n([\s\S]+?)(?:\n##|\Z)", content)
+            if learnings_match:
+                route_learnings(hero_name, quest_id, learnings_match.group(1).strip(), project_name)
+
+        # Update proficiency tracking
+        if project_name:
+            hero_row = conn.execute("SELECT id FROM heroes WHERE name = ?", (hero_name,)).fetchone()
+            if hero_row:
+                update_proficiency(hero_row["id"], project_name)
 
     # Save learnings to hero history
     hero_dir = GUILD_DIR / "workspace" / "memory" / "heroes" / hero_name

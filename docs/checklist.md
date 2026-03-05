@@ -157,20 +157,20 @@
 ## Phase 2 — Memory & Skills (Week 3)
 
 ### 2.1 Memory Manager (`agents/memory_manager.py`)
-- [ ] Read shared memory: `workspace/memory/shared/projects/{name}.md`
-- [ ] Read hero private memory: `workspace/memory/heroes/{name}/notes.md`
-- [ ] Read hero history: `workspace/memory/heroes/{name}/history.md`
-- [ ] Read hero skills: `workspace/memory/heroes/{name}/skills/{skill}.md`
-- [ ] Write ke semua memory locations
-- [ ] Memory file size check — warn kalau approaching 50KB
+- [x] Read shared memory: `workspace/memory/shared/projects/{name}.md`
+- [x] Read hero private memory: `workspace/memory/heroes/{name}/notes.md`
+- [x] Read hero history: `workspace/memory/heroes/{name}/history.md`
+- [x] Read hero skills: `workspace/memory/heroes/{name}/skills/{skill}.md`
+- [x] Write ke semua memory locations
+- [x] Memory file size check — warn kalau approaching 50KB
 
 ### 2.2 Dynamic CLAUDE.md Generation
 - [x] Assemble dari 4 sources: hero identity, quest context, personal context, project context
 - [x] Hero identity section: class, skills, focus area, guild rules
 - [x] Current quest section: ID, objective, branch, project, chain role
 - [x] Personal context: notes.md
-- [ ] Project context: shared/projects/{project}.md relevant section
-- [ ] Skill context: relevant skill backing files matching project
+- [x] Project context: shared/projects/{project}.md relevant section
+- [x] Skill context: relevant skill backing files matching project
 - [x] Memory update protocol instructions (outbox format, what goes where)
 - [x] Guild rules (commit format, branch rules, never push to main)
 - [x] Write assembled CLAUDE.md ke `workspace/memory/heroes/{name}/CLAUDE.md`
@@ -178,49 +178,49 @@
 ### 2.3 Hero Memory Update Protocol
 - [x] Hero writes outbox format: status, summary, files_changed, learnings, blockers
 - [x] Guild Master reads outbox → processes learnings
-- [ ] Route learnings: architectural → ADR, project-wide → shared memory, personal → notes.md
+- [x] Route learnings: architectural → ADR, project-wide → shared memory, personal → notes.md
 - [x] Update hero history.md dengan quest completion entry
 - [ ] Clear current quest section dari hero CLAUDE.md
 
 ### 2.4 Shared Memory Accumulation
-- [ ] Guild Master checks hero outbox learnings field
-- [ ] Append project-relevant learnings ke `shared/projects/{project}.md`
+- [x] Guild Master checks hero outbox learnings field
+- [x] Append project-relevant learnings ke `shared/projects/{project}.md`
 - [ ] Detect conflicts dengan existing shared memory (Section 10 Scenario C)
-- [ ] Create ADR untuk architectural decisions (`shared/projects/{name}-adr/adr-NNN.md`)
+- [x] Create ADR untuk architectural decisions (`shared/projects/{name}-adr/adr-NNN.md`)
 - [ ] No duplicate information — check before writing
 
 ### 2.5 Auto-Summarization
-- [ ] Detect memory file > 50KB
-- [ ] Archive current content ke `workspace/memory/heroes/{name}/archive/{date}-notes.md`
-- [ ] Summarize ke condensed version
+- [x] Detect memory file > 50KB
+- [x] Archive current content ke `workspace/memory/heroes/{name}/archive/{date}-notes.md`
+- [x] Summarize ke condensed version
 - [ ] Log summarization event
 
 ### 2.6 Skill System
 - [x] Base skills defined per hero class (from appendix)
-- [ ] `guild skill list {hero}` — list all skills
-- [ ] `guild skill show {hero} {skill}` — skill detail
-- [ ] `guild skill add {hero} {skill}` — manual skill add (type=manual)
-- [ ] `guild skill remove {hero} {skill}`
+- [x] `guild skill list {hero}` — list all skills
+- [x] `guild skill show {hero} {skill}` — skill detail
+- [x] `guild skill add {hero} {skill}` — manual skill add (type=manual)
+- [x] `guild skill remove {hero} {skill}`
 - [ ] `guild skill edit {hero} {skill}` — open in $EDITOR
-- [ ] `guild skill transfer {from_hero} {to_hero} {skill}` — copy skill backing file
-- [ ] Skill backing files: create `workspace/memory/heroes/{name}/skills/{skill}.md`
+- [x] `guild skill transfer {from_hero} {to_hero} {skill}` — copy skill backing file
+- [x] Skill backing files: create `workspace/memory/heroes/{name}/skills/{skill}.md`
 
 ### 2.7 Proficiency Tracking
-- [ ] Track quest count per domain/project per hero
-- [ ] Auto-update proficiency: 1-2 quests=1, 3-5=2, 6-10=3, 11-20=4, 21+=5
-- [ ] Update proficiency on quest completion
-- [ ] At proficiency >= 4: extract key learnings ke shared memory
+- [x] Track quest count per domain/project per hero
+- [x] Auto-update proficiency: 1-2 quests=1, 3-5=2, 6-10=3, 11-20=4, 21+=5
+- [x] Update proficiency on quest completion
+- [x] At proficiency >= 4: extract key learnings ke shared memory
 
 ### 2.8 Memory CLI Commands
-- [ ] `guild memory` — shared memory index
-- [ ] `guild memory --project {name}` — project-specific memory
-- [ ] `guild memory --hero {name}` — hero private memory
-- [ ] `guild memory --project {name} --adr {number}` — view specific ADR
-- [ ] `guild memory edit --project {name}` — edit in $EDITOR
-- [ ] `guild memory edit --hero {name} --file notes`
-- [ ] `guild memory clear --hero {name} --private` — clear private memory
-- [ ] `guild memory export --output {path}` — export all memory
-- [ ] `guild memory import {path}` — import memory
+- [x] `guild memory show` — shared memory index
+- [x] `guild memory show --project {name}` — project-specific memory
+- [x] `guild memory show --hero {name}` — hero private memory
+- [x] `guild memory show --project {name} --adr {number}` — view specific ADR
+- [x] `guild memory edit --project {name}` — edit in $EDITOR
+- [x] `guild memory edit --hero {name} --file notes`
+- [x] `guild memory clear --hero {name}` — clear private memory
+- [x] `guild memory export --output {path}` — export all memory
+- [x] `guild memory import {path}` — import memory
 
 ---
 

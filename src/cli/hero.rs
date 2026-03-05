@@ -281,6 +281,44 @@ fn run_start(hero_id: &str, hero_name: &str, hero_class: &str, conn: &rusqlite::
         claude_md.push_str("No quest assigned. Check with Guild Master or wait for assignment.\n\n");
     }
 
+    // Project context (shared memory)
+    if let Some((_, _, _, _, project_id)) = &current_quest {
+        // Try to find project name
+        let project_name: Option<String> = conn.query_row(
+            "SELECT name FROM projects WHERE id = ?1 OR name = ?1",
+            [project_id.as_str()],
+            |row| row.get(0),
+        ).ok();
+        if let Some(pname) = &project_name {
+            let project_mem = guild_dir.join(format!("workspace/memory/shared/projects/{}.md", pname));
+            if let Ok(content) = std::fs::read_to_string(&project_mem) {
+                if content.trim().len() > format!("# {}\n\nProject knowledge base.", pname).len() {
+                    claude_md.push_str("## Project Knowledge\n");
+                    claude_md.push_str(&content);
+                    claude_md.push_str("\n\n");
+                }
+            }
+        }
+    }
+
+    // Skill backing files (for skills matching quest req_skills or top proficiency)
+    let skills_dir = hero_dir.join("skills");
+    if skills_dir.exists() {
+        let mut skill_context = String::new();
+        for (skill, _) in &skills {
+            let skill_file = skills_dir.join(format!("{}.md", skill));
+            if let Ok(content) = std::fs::read_to_string(&skill_file) {
+                if content.trim().len() > format!("# Skill: {}", skill).len() + 10 {
+                    skill_context.push_str(&format!("### {}\n{}\n\n", skill, content.trim()));
+                }
+            }
+        }
+        if !skill_context.is_empty() {
+            claude_md.push_str("## Skill Knowledge\n");
+            claude_md.push_str(&skill_context);
+        }
+    }
+
     // Guild rules
     claude_md.push_str("## Guild Rules\n");
     claude_md.push_str("- Commit format: `[GLD-{quest_id}] {description} — ");

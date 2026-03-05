@@ -1,8 +1,10 @@
 mod goal;
 mod hero;
 mod init;
+mod memory;
 mod project;
 mod quest;
+mod skill;
 mod status;
 
 use anyhow::Result;
@@ -97,6 +99,14 @@ pub enum Command {
         all: bool,
     },
 
+    /// Manage shared and hero memory
+    #[command(subcommand)]
+    Memory(memory::MemoryCommand),
+
+    /// Manage hero skills
+    #[command(subcommand)]
+    Skill(skill::SkillCommand),
+
     /// Manage quests
     #[command(subcommand)]
     Quest(quest::QuestCommand),
@@ -136,6 +146,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Retire { name } => hero::run_retire(name),
         Command::Pause { name, all } => hero::run_pause(name, all),
         Command::Resume { name, all } => hero::run_resume(name, all),
+        Command::Memory(cmd) => memory::run(cmd),
+        Command::Skill(cmd) => skill::run(cmd),
         Command::Quest(cmd) => quest::run(cmd),
         Command::Quests { project, status } => quest::run_list(project, status),
         Command::Assign { quest_id, hero_name } => quest::run_assign(quest_id, hero_name),
