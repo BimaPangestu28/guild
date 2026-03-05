@@ -1,9 +1,12 @@
 use anyhow::Result;
+use include_dir::{include_dir, Dir};
 use tiny_http::{Header, Method, Response, Server};
 
 use crate::db;
 use std::fs;
 use std::path::PathBuf;
+
+static DASHBOARD_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/dashboard/dist");
 
 pub fn serve(port: u16, dashboard_dir: Option<PathBuf>) -> Result<()> {
     let server = Server::http(format!("0.0.0.0:{}", port))
@@ -375,51 +378,61 @@ fn serve_static(
     path: &str,
     dashboard_dir: &Option<PathBuf>,
 ) -> Result<()> {
-    let dir = match dashboard_dir {
-        Some(d) => d.clone(),
-        None => {
-            let resp = Response::from_string("Dashboard not found. Build the frontend first.")
-                .with_status_code(404);
+    // Prevent path traversal
+    let clean = path.trim_start_matches('/');
+    if clean.contains("..") {
+        let resp = Response::from_string("Forbidden").with_status_code(403);
+        request.respond(resp)?;
+        return Ok(());
+    }
+
+    let relative = if clean.is_empty() { "index.html" } else { clean };
+
+    // If dashboard_dir is Some and exists on disk, serve from disk (dev mode)
+    if let Some(dir) = dashboard_dir {
+        if dir.is_dir() {
+            let file_path = dir.join(relative);
+            let (actual_path, content) = if file_path.is_file() {
+                let data = fs::read(&file_path)?;
+                (file_path, data)
+            } else {
+                // SPA fallback
+                let index = dir.join("index.html");
+                if index.is_file() {
+                    let data = fs::read(&index)?;
+                    (index, data)
+                } else {
+                    let resp = Response::from_string("Not Found").with_status_code(404);
+                    request.respond(resp)?;
+                    return Ok(());
+                }
+            };
+
+            let content_type = guess_content_type(&actual_path);
+            let header = Header::from_bytes("Content-Type", content_type).unwrap();
+            let resp = Response::from_data(content).with_header(header);
             request.respond(resp)?;
             return Ok(());
         }
-    };
+    }
 
-    // Map / to /index.html
-    let file_path = if path == "/" {
-        dir.join("index.html")
+    // Serve from embedded DASHBOARD_DIR
+    let content = if let Some(file) = DASHBOARD_DIR.get_file(relative) {
+        file.contents().to_vec()
     } else {
-        // Strip leading slash and prevent path traversal
-        let clean = path.trim_start_matches('/');
-        if clean.contains("..") {
-            let resp = Response::from_string("Forbidden").with_status_code(403);
-            request.respond(resp)?;
-            return Ok(());
-        }
-        dir.join(clean)
-    };
-
-    // Try to serve the file, or fall back to index.html (SPA)
-    let (actual_path, content) = if file_path.is_file() {
-        let data = fs::read(&file_path)?;
-        (file_path, data)
-    } else {
-        // SPA fallback
-        let index = dir.join("index.html");
-        if index.is_file() {
-            let data = fs::read(&index)?;
-            (index, data)
-        } else {
-            let resp = Response::from_string("Not Found").with_status_code(404);
-            request.respond(resp)?;
-            return Ok(());
+        // SPA fallback: serve embedded index.html
+        match DASHBOARD_DIR.get_file("index.html") {
+            Some(index) => index.contents().to_vec(),
+            None => {
+                let resp = Response::from_string("Dashboard not found").with_status_code(404);
+                request.respond(resp)?;
+                return Ok(());
+            }
         }
     };
 
-    let content_type = guess_content_type(&actual_path);
-    let header =
-        Header::from_bytes("Content-Type", content_type).unwrap();
-
+    let content_type = guess_content_type_str(relative);
+    let header = Header::from_bytes("Content-Type", content_type).unwrap();
     let resp = Response::from_data(content).with_header(header);
     request.respond(resp)?;
     Ok(())
@@ -439,5 +452,26 @@ fn guess_content_type(path: &PathBuf) -> &'static str {
         Some("woff2") => "font/woff2",
         Some("ttf") => "font/ttf",
         _ => "application/octet-stream",
+    }
+}
+
+fn guess_content_type_str(path: &str) -> &'static str {
+    if let Some(dot_pos) = path.rfind('.') {
+        match &path[dot_pos + 1..] {
+            "html" => "text/html; charset=utf-8",
+            "js" => "application/javascript; charset=utf-8",
+            "css" => "text/css; charset=utf-8",
+            "json" => "application/json; charset=utf-8",
+            "png" => "image/png",
+            "svg" => "image/svg+xml",
+            "jpg" | "jpeg" => "image/jpeg",
+            "ico" => "image/x-icon",
+            "woff" => "font/woff",
+            "woff2" => "font/woff2",
+            "ttf" => "font/ttf",
+            _ => "application/octet-stream",
+        }
+    } else {
+        "application/octet-stream"
     }
 }

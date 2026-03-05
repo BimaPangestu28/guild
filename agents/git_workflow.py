@@ -9,6 +9,7 @@ import logging
 import re
 import sqlite3
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -543,3 +544,100 @@ def check_branch_exists(project_path, branch_name):
         return True
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# 11. get_repo_info
+# ---------------------------------------------------------------------------
+
+def get_repo_info(project_path):
+    """Get owner/repo from git remote.
+
+    Parses the origin URL (HTTPS or SSH) and returns (owner, repo).
+    Returns (None, None) if parsing fails.
+    """
+    result = _run_git(["git", "remote", "get-url", "origin"], cwd=project_path)
+    if result is None or result.returncode != 0:
+        logger.warning("Could not get remote URL for %s", project_path)
+        return None, None
+    url = result.stdout.strip()
+    # Parse github.com/owner/repo or similar (works for HTTPS and SSH)
+    match = re.search(r'[:/]([^/]+)/([^/.]+)', url)
+    if match:
+        return match.group(1), match.group(2)
+    logger.warning("Could not parse owner/repo from remote URL: %s", url)
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# 12. setup_branch_protection
+# ---------------------------------------------------------------------------
+
+def setup_branch_protection(project_path, provider, main_branch="main", dev_branch="development"):
+    """Configure branch protection rules via provider API.
+
+    Uses get_repo_info to dynamically resolve owner/repo.
+    Returns True on success, False on failure.
+    """
+    owner, repo = get_repo_info(project_path)
+    if not owner or not repo:
+        logger.warning("Cannot setup branch protection: unable to determine owner/repo")
+        return False
+
+    if provider == "github":
+        try:
+            # main branch: require PR, require approvals, enforce admins
+            result = _run_git(["gh", "api", "-X", "PUT",
+                f"/repos/{owner}/{repo}/branches/{main_branch}/protection",
+                "-f", "required_pull_request_reviews[required_approving_review_count]=1",
+                "-f", "enforce_admins=true",
+                "-f", "required_status_checks=null",
+                "-f", "restrictions=null"], cwd=project_path)
+            if result is None or result.returncode != 0:
+                stderr = result.stderr if result else "unknown error"
+                logger.warning("Failed to protect branch %s: %s", main_branch, stderr)
+                return False
+
+            # dev branch: require PR, but don't enforce admins
+            result = _run_git(["gh", "api", "-X", "PUT",
+                f"/repos/{owner}/{repo}/branches/{dev_branch}/protection",
+                "-f", "required_pull_request_reviews[required_approving_review_count]=1",
+                "-f", "enforce_admins=false",
+                "-f", "required_status_checks=null",
+                "-f", "restrictions=null"], cwd=project_path)
+            if result is None or result.returncode != 0:
+                stderr = result.stderr if result else "unknown error"
+                logger.warning("Failed to protect branch %s: %s", dev_branch, stderr)
+                return False
+
+            logger.info("Branch protection configured for %s/%s (github)", owner, repo)
+            return True
+
+        except Exception as exc:
+            logger.warning("Branch protection setup failed: %s", exc)
+            return False
+
+    elif provider == "gitlab":
+        try:
+            # URL-encode owner/repo for GitLab project ID
+            project_id = urllib.parse.quote(f"{owner}/{repo}", safe="")
+            result = _run_git(["glab", "api", "-X", "POST",
+                f"/projects/{project_id}/protected_branches",
+                "-f", f"name={main_branch}",
+                "-f", "push_access_level=0",
+                "-f", "merge_access_level=40"], cwd=project_path)
+            if result is None or result.returncode != 0:
+                stderr = result.stderr if result else "unknown error"
+                logger.warning("Failed to protect branch %s on GitLab: %s", main_branch, stderr)
+                return False
+
+            logger.info("Branch protection configured for %s/%s (gitlab)", owner, repo)
+            return True
+
+        except Exception as exc:
+            logger.warning("GitLab branch protection setup failed: %s", exc)
+            return False
+
+    else:
+        logger.warning("Branch protection not supported for provider: %s", provider)
+        return False

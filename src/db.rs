@@ -295,3 +295,93 @@ pub fn log_activity(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        create_tables(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_create_tables() {
+        let conn = test_db();
+        // Verify all tables exist
+        let tables: Vec<String> = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).unwrap()
+        .query_map([], |row| row.get(0)).unwrap()
+        .filter_map(|r| r.ok()).collect();
+
+        assert!(tables.contains(&"heroes".to_string()));
+        assert!(tables.contains(&"projects".to_string()));
+        assert!(tables.contains(&"quests".to_string()));
+        assert!(tables.contains(&"quest_chains".to_string()));
+        assert!(tables.contains(&"hero_skills".to_string()));
+        assert!(tables.contains(&"activity_log".to_string()));
+        assert!(tables.contains(&"file_locks".to_string()));
+        assert!(tables.contains(&"memories".to_string()));
+        assert!(tables.contains(&"mcp_servers".to_string()));
+    }
+
+    #[test]
+    fn test_log_activity() {
+        let conn = test_db();
+        log_activity(&conn, "test", "test action", None, None, "info").unwrap();
+
+        let count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM activity_log", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(count, 1);
+
+        let action: String = conn.query_row(
+            "SELECT action FROM activity_log", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(action, "test action");
+    }
+
+    #[test]
+    fn test_lock_files() {
+        let conn = test_db();
+
+        // Insert a hero first
+        conn.execute(
+            "INSERT INTO heroes (id, name, class, status, level, xp, last_active) VALUES ('h1', 'TestHero', 'Rust Sorcerer', 'idle', 1, 0, '2024-01-01')",
+            [],
+        ).unwrap();
+
+        let conflicts = lock_files(&conn, &["src/main.rs", "src/lib.rs"], "q1", "h1").unwrap();
+        assert!(conflicts.is_empty());
+
+        // Lock same files with different quest should conflict
+        let conflicts = lock_files(&conn, &["src/main.rs"], "q2", "h1").unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].contains("src/main.rs"));
+
+        // Release locks
+        let released = release_locks(&conn, "q1").unwrap();
+        assert_eq!(released, 2);
+
+        // Now should work
+        let conflicts = lock_files(&conn, &["src/main.rs"], "q2", "h1").unwrap();
+        assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_get_locks() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO heroes (id, name, class, status, level, xp, last_active) VALUES ('h1', 'TestHero', 'Rust Sorcerer', 'idle', 1, 0, '2024-01-01')",
+            [],
+        ).unwrap();
+
+        lock_files(&conn, &["file1.rs"], "q1", "h1").unwrap();
+        let locks = get_locks(&conn).unwrap();
+        assert_eq!(locks.len(), 1);
+        assert_eq!(locks[0].0, "file1.rs");
+    }
+}

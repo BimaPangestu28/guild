@@ -212,19 +212,13 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::SetupTelegram => run_setup_telegram(),
         Command::Locks => run_locks(),
         Command::Dashboard => {
-            // Look for dashboard static files
+            // Dev override: serve from disk if local dashboard/dist/ exists
             let dashboard_dir = std::env::current_dir()
                 .ok()
                 .map(|d| d.join("dashboard").join("dist"))
-                .filter(|d| d.is_dir())
-                .or_else(|| {
-                    // Fallback: check next to the executable
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|e| e.parent().map(|p| p.join("dashboard").join("dist")))
-                        .filter(|d| d.is_dir())
-                });
+                .filter(|d| d.is_dir());
 
+            // If None, the embedded dashboard will be used automatically
             crate::api::serve(7432, dashboard_dir)
         }
         Command::Backup(cmd) => run_backup(cmd),

@@ -42,7 +42,7 @@
 - [x] Table: `activity_log` (id, timestamp, actor, action, quest_id, project_id, level)
 - [x] `log_activity()` helper function
 - [ ] CRUD functions untuk setiap table
-- [ ] Hourly auto-backup logic (`~/.guild/backups/guild-{timestamp}.db`, retain 24)
+- [x] Hourly auto-backup logic (`~/.guild/backups/guild-{timestamp}.db`, retain 24)
 
 ### 1.3 Filesystem Structure
 - [x] `guild init` creates `~/.guild/` root directory
@@ -429,8 +429,8 @@
 
 ### 5.9 Telegram Daily Briefing
 - [ ] Configurable time: `guild config --set daily-briefing-time {HH:MM}`
-- [ ] Content: active quests, hero availability, priorities, blockers
-- [ ] Max 200 words
+- [x] Content: active quests, hero availability, priorities, blockers
+- [x] Max 200 words
 
 ### 5.10 Proactive Behaviors
 - [x] Idle hero check: hero → idle → check backlog → auto-assign if match (Phase 3)
@@ -451,7 +451,7 @@
 
 ### 6.1 Dashboard API Layer
 - [x] Setup React project di `dashboard/`
-- [ ] Bundle into Rust binary at build time (no Node.js required on user machine)
+- [x] Bundle into Rust binary at build time (no Node.js required on user machine)
 - [x] `guild dashboard` → serve di localhost:7432
 - [x] API layer: Rust serves JSON endpoints dari guild.db (tiny_http)
 - [x] Replace mock data with real API calls (usePolling hook)
@@ -492,7 +492,7 @@
 
 ### 6.6 Documentation & Launch
 - [x] README.md — project overview, installation, quickstart, CLI reference
-- [ ] Contributing guide (if open source)
+- [x] Contributing guide (if open source)
 - [ ] Show HN post draft
 - [ ] Launch assets (screenshots, demo GIF)
 
@@ -512,8 +512,8 @@
 - [ ] Hero attempts push to main → block (branch protection), suspend, notify
 
 ### Testing
-- [ ] Rust unit tests untuk db layer, process manager, CLI parsing
-- [ ] Python unit tests untuk guild_master, memory_manager, mcp_builder
+- [x] Rust unit tests untuk db layer, process manager, CLI parsing
+- [x] Python unit tests untuk guild_master, memory_manager, mcp_builder
 - [ ] Integration tests: goal → quest chain → hero assignment flow
 - [ ] Test on both macOS dan Linux dari Phase 1
 
@@ -522,4 +522,4 @@
 - [x] Retain last 24 backups
 - [x] `guild backup list`
 - [x] `guild backup restore {filename}` (with safety backup + confirm prompt)
-- [ ] Auto-backup every hour
+- [x] Auto-backup every hour

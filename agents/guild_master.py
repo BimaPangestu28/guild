@@ -9,6 +9,7 @@ assigns quests to heroes, and processes hero completion reports.
 import json
 import os
 import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -742,6 +743,23 @@ def run_cycle(client):
     conn.close()
 
 
+def db_backup():
+    """Create hourly database backup."""
+    backup_dir = GUILD_DIR / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    backup_name = f"guild-{timestamp}.db"
+    shutil.copy2(str(DB_PATH), str(backup_dir / backup_name))
+
+    # Retain only last 24
+    backups = sorted(backup_dir.glob("guild-*.db"))
+    while len(backups) > 24:
+        backups[0].unlink()
+        backups.pop(0)
+
+    print(f"  Auto-backup: {backup_name}")
+
+
 def main():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -762,12 +780,23 @@ def main():
 
     log_activity(get_db(), "guild-master", "Guild Master started")
 
+    last_backup = time.time()
+
     try:
         while True:
             try:
                 run_cycle(client)
             except Exception as e:
                 print(f"  ! Cycle error: {e}")
+
+            # Hourly auto-backup
+            if time.time() - last_backup > 3600:
+                try:
+                    db_backup()
+                except Exception as e:
+                    print(f"  ! Backup error: {e}")
+                last_backup = time.time()
+
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
         print("\n⚔ Guild Master offline")

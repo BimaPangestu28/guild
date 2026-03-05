@@ -162,6 +162,74 @@ def get_db():
 
 
 # ---------------------------------------------------------------------------
+# Daily Briefing
+# ---------------------------------------------------------------------------
+
+def generate_daily_briefing(conn):
+    """Generate daily briefing content (max 200 words)."""
+    # Active quests
+    active = conn.execute(
+        "SELECT COUNT(*) FROM quests WHERE status = 'active'"
+    ).fetchone()[0]
+    backlog = conn.execute(
+        "SELECT COUNT(*) FROM quests WHERE status = 'backlog'"
+    ).fetchone()[0]
+    blocked = conn.execute(
+        "SELECT COUNT(*) FROM quests WHERE status = 'blocked'"
+    ).fetchone()[0]
+    done_today = conn.execute(
+        "SELECT COUNT(*) FROM quests WHERE status = 'done' AND completed_at >= date('now')"
+    ).fetchone()[0]
+
+    # Heroes
+    heroes = conn.execute(
+        "SELECT name, status FROM heroes ORDER BY name"
+    ).fetchall()
+
+    # Build briefing
+    lines = ["*Daily Guild Briefing*", ""]
+    lines.append(f"Quests: {active} active, {backlog} backlog, {blocked} blocked, {done_today} done today")
+    lines.append("")
+    lines.append("Heroes:")
+    for h in heroes:
+        lines.append(f"  {h['name']}: {h['status']}")
+
+    if blocked > 0:
+        blocked_quests = conn.execute(
+            "SELECT id, title FROM quests WHERE status = 'blocked' LIMIT 3"
+        ).fetchall()
+        lines.append("")
+        lines.append("Blocked:")
+        for q in blocked_quests:
+            lines.append(f"  [{q['id']}] {q['title']}")
+
+    return "\n".join(lines)
+
+
+def check_daily_briefing(bot, conn, config):
+    """Check if it's time to send daily briefing.
+
+    Reads briefing_time from config (default '09:00'), sends once per day,
+    and records state to avoid duplicate sends.
+    """
+    briefing_time = config.get("daily_briefing_time", "09:00")
+    now = datetime.now()
+    target_hour, target_min = map(int, briefing_time.split(":"))
+
+    if now.hour == target_hour and now.minute == target_min:
+        # Check if already sent today
+        today_key = f"briefing_{now.strftime('%Y%m%d')}"
+        state_file = GUILD_DIR / "workspace" / ".briefing_state"
+        if state_file.exists() and state_file.read_text().strip() == today_key:
+            return
+
+        briefing = generate_daily_briefing(conn)
+        bot.send_message(briefing, parse_mode="Markdown")
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(today_key)
+
+
+# ---------------------------------------------------------------------------
 # Command Handlers
 # ---------------------------------------------------------------------------
 
@@ -484,6 +552,9 @@ def main():
 
     bot.send_notification(LEVEL_TELEGRAM, "Guild Telegram Bot started.")
 
+    # Load config for daily briefing settings
+    config = bot._load_config()
+
     offset = 0
 
     try:
@@ -502,6 +573,14 @@ def main():
                             print(f"  ! Ignored message from chat {msg_chat_id}")
             except Exception as e:
                 print(f"  ! Poll error: {e}")
+
+            # Check if daily briefing should be sent
+            try:
+                conn = get_db()
+                check_daily_briefing(bot, conn, config)
+                conn.close()
+            except Exception as e:
+                print(f"  ! Briefing check error: {e}")
 
             time.sleep(POLL_INTERVAL)
 
