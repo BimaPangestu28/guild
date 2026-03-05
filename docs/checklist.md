@@ -299,26 +299,25 @@
 ## Phase 4 — Git Workflow (Week 6)
 
 ### 4.1 Automated Branch Management
-- [ ] On quest creation: generate branch name `{type}/GLD-{id}-{slug}`
-- [ ] On quest start: create branch from `development` (never from `main`)
-- [ ] On quest complete + merge: delete merged branch
-- [ ] Handle: branch already exists → reuse if same quest, append `-v2` if different
+- [x] On quest creation: generate branch name `{type}/GLD-{id}-{slug}`
+- [x] On quest start: create branch from `development` (never from `main`)
+- [x] On quest complete + merge: delete merged branch
+- [x] Handle: branch already exists → reuse if same quest, append `-v2` if different
 
 ### 4.2 PR Automation
-- [ ] On test quest pass: auto-create PR from feature branch → `development`
-- [ ] PR body auto-generated: quest description, test results, changed files, learnings
-- [ ] PR template format per docs (Section 04)
-- [ ] GitHub API integration via `gh` or API
-- [ ] GitLab API integration
-- [ ] Provider=none: notify developer with manual merge command
+- [x] On test quest pass: auto-create PR from feature branch → `development`
+- [x] PR body auto-generated: quest description, changed files, learnings
+- [x] GitHub API integration via `gh`
+- [x] GitLab API integration via `glab`
+- [x] Provider=none: notify developer with manual merge command
 
 ### 4.3 Quest Chain Enforcement
-- [ ] After impl complete → auto-spawn test quest (assign different hero)
-- [ ] After test pass → create PR → auto-spawn review quest (third hero)
-- [ ] After review approved → auto-merge PR to `development`
+- [x] After impl complete → auto-spawn test quest (assign different hero) (Phase 3)
+- [x] After test pass → create PR → auto-spawn review quest (Phase 3)
+- [x] After review approved → mark chain done (Phase 3)
 - [ ] After review changes requested → create fix quest → assign back to implementor
 - [ ] Common quests (<1hr, low risk) may skip test/review — log this decision
-- [ ] Enforce chain rule: no hero holds two roles in same chain
+- [x] Enforce chain rule: no hero holds two roles in same chain (Phase 3)
 
 ### 4.4 Branch Protection Setup
 - [ ] On `guild project add`: configure branch protection rules via provider API
@@ -343,16 +342,17 @@
 - [ ] Shared memory across repos in group
 
 ### 4.7 Commit Convention Enforcement
-- [ ] Heroes follow: `[GLD-{id}] {short description} — {hero_name}`
-- [ ] Guild Master validates commit messages dari hero sessions
+- [x] Heroes follow: `[GLD-{id}] {short description} — {hero_name}` (in CLAUDE.md rules)
+- [x] Guild Master validates commit messages dari hero sessions
 - [ ] WIP commit on pause: `[GLD-{id}] WIP — paused by developer — {hero_name}`
 
 ### 4.8 File-Level Locking
 - [ ] Before quest assignment: parse description, identify likely files
-- [ ] Check `file_locks` table for conflicts
+- [x] Check `file_locks` table for conflicts (`db::lock_files`)
 - [ ] If conflict: queue quest until lock released
-- [ ] On quest completion/cancel: release all locks
+- [x] On quest completion/cancel: release all locks (`db::release_locks`)
 - [ ] Auto-activate queued quests when lock released
+- [x] `guild locks` — show active file locks
 
 ---
 

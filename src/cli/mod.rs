@@ -9,6 +9,9 @@ mod status;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
+
+use crate::db;
 
 #[derive(Parser)]
 #[command(name = "guild", about = "Self-hosted multi-agent development OS")]
@@ -127,6 +130,9 @@ pub enum Command {
         hero_name: String,
     },
 
+    /// Show active file locks
+    Locks,
+
     /// Open local dashboard
     Dashboard,
 }
@@ -151,9 +157,35 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Quest(cmd) => quest::run(cmd),
         Command::Quests { project, status } => quest::run_list(project, status),
         Command::Assign { quest_id, hero_name } => quest::run_assign(quest_id, hero_name),
+        Command::Locks => run_locks(),
         Command::Dashboard => {
             println!("Opening dashboard at http://localhost:7432 ...");
             Ok(())
         }
     }
+}
+
+fn run_locks() -> Result<()> {
+    let conn = db::open()?;
+    let locks = db::get_locks(&conn)?;
+
+    println!("{}", "FILE LOCKS".yellow().bold());
+    println!("{}", "─".repeat(70));
+
+    if locks.is_empty() {
+        println!("  No active file locks.");
+    } else {
+        for (file_path, quest_id, hero_name, locked_at) in &locks {
+            println!(
+                "  {} — quest {} by {} ({})",
+                file_path.cyan(),
+                quest_id.dimmed(),
+                hero_name.yellow(),
+                locked_at.dimmed(),
+            );
+        }
+        println!("\n  {} lock(s) active.", locks.len());
+    }
+
+    Ok(())
 }

@@ -183,6 +183,15 @@ fn run_set_status(id: &str, status: &str) -> Result<()> {
     if updated == 0 {
         bail!("Quest '{}' not found", id);
     }
+
+    // Release file locks when quest is done or cancelled
+    if status == "done" || status == "cancelled" {
+        let released = db::release_locks(&conn, id)?;
+        if released > 0 {
+            println!("  Released {} file lock(s)", released);
+        }
+    }
+
     println!("{} Quest {} → {}", "✓".green(), id.cyan(), status);
     Ok(())
 }

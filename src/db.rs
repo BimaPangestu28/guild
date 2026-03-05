@@ -162,6 +162,50 @@ fn create_tables(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Lock files for a quest/hero
+pub fn lock_files(conn: &Connection, files: &[&str], quest_id: &str, hero_id: &str) -> Result<Vec<String>> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut conflicts = vec![];
+    for file in files {
+        // Check if already locked by another quest
+        let existing: Option<(String, String)> = conn.query_row(
+            "SELECT quest_id, hero_id FROM file_locks WHERE file_path = ?1",
+            [file],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).ok();
+
+        if let Some((existing_quest, _)) = existing {
+            if existing_quest != quest_id {
+                conflicts.push(format!("{} (locked by quest {})", file, existing_quest));
+                continue;
+            }
+        }
+
+        conn.execute(
+            "INSERT OR REPLACE INTO file_locks (file_path, quest_id, hero_id, locked_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![file, quest_id, hero_id, now],
+        )?;
+    }
+    Ok(conflicts)
+}
+
+/// Release all locks for a quest
+pub fn release_locks(conn: &Connection, quest_id: &str) -> Result<usize> {
+    let count = conn.execute("DELETE FROM file_locks WHERE quest_id = ?1", [quest_id])?;
+    Ok(count)
+}
+
+/// Get all current file locks
+pub fn get_locks(conn: &Connection) -> Result<Vec<(String, String, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT f.file_path, f.quest_id, h.name, f.locked_at FROM file_locks f JOIN heroes h ON f.hero_id = h.id ORDER BY f.locked_at"
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
 pub fn log_activity(
     conn: &Connection,
     actor: &str,
