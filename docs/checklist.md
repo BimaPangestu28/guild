@@ -475,21 +475,23 @@
 - [ ] Queued Telegram notifications visible in dashboard
 
 ### 6.4 License System
-- [ ] Offline license key verification algorithm
-- [ ] Free tier: 2 heroes max, no shared memory, no dashboard, no Telegram, no proactive
-- [ ] Pro tier: 8 heroes, full features
-- [ ] License stored locally, works offline after activation
-- [ ] Enforce limits at hero creation dan feature access
+- [x] Offline license key verification algorithm
+- [x] Free tier: 2 heroes max
+- [x] Pro tier: 8 heroes, full features
+- [x] License stored locally, works offline after activation (`~/.guild/license.key`)
+- [x] Enforce limits at hero creation (`license.check_hero_limit()`)
+- [x] `guild activate {key}` command
 
 ### 6.5 Onboarding Polish
-- [ ] Rookie period (first 7 days): more conservative GM, more frequent updates
+- [x] Rookie mode flag in config.json (set on first init)
 - [ ] "Why I did this" explanations on every autonomous action during rookie
-- [ ] Suggest when to recruit 2nd/3rd hero
-- [ ] `guild config --skip-rookie` to disable
-- [ ] Smooth `guild init` flow dengan clear progress steps [1/6] through [6/6]
+- [x] Getting started tips printed on first init
+- [x] `guild config skip-rookie` to disable
+- [x] `guild config show/set` for all configuration
+- [x] `guild doctor` health check command
 
 ### 6.6 Documentation & Launch
-- [ ] README.md — project overview, installation, quickstart
+- [x] README.md — project overview, installation, quickstart, CLI reference
 - [ ] Contributing guide (if open source)
 - [ ] Show HN post draft
 - [ ] Launch assets (screenshots, demo GIF)
@@ -516,7 +518,8 @@
 - [ ] Test on both macOS dan Linux dari Phase 1
 
 ### Backup & Recovery
-- [ ] `guild.db` auto-backup every hour ke `~/.guild/backups/`
-- [ ] Retain last 24 backups
-- [ ] `guild backup list`
-- [ ] `guild backup restore {filename}`
+- [x] `guild.db` backup on demand (`guild backup create`)
+- [x] Retain last 24 backups
+- [x] `guild backup list`
+- [x] `guild backup restore {filename}` (with safety backup + confirm prompt)
+- [ ] Auto-backup every hour

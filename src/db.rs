@@ -206,6 +206,79 @@ pub fn get_locks(conn: &Connection) -> Result<Vec<(String, String, String, Strin
     rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
 }
 
+/// Create a backup of the database
+pub fn backup() -> Result<String> {
+    let db = db_path();
+    if !db.exists() {
+        anyhow::bail!("Database not found");
+    }
+
+    let backup_dir = guild_dir().join("backups");
+    std::fs::create_dir_all(&backup_dir)?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let backup_name = format!("guild-{}.db", timestamp);
+    let backup_path = backup_dir.join(&backup_name);
+
+    std::fs::copy(&db, &backup_path)?;
+
+    // Retain only last 24 backups
+    let mut backups: Vec<_> = std::fs::read_dir(&backup_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "db").unwrap_or(false))
+        .collect();
+    backups.sort_by_key(|e| e.path());
+
+    while backups.len() > 24 {
+        if let Some(oldest) = backups.first() {
+            let _ = std::fs::remove_file(oldest.path());
+        }
+        backups.remove(0);
+    }
+
+    Ok(backup_name)
+}
+
+/// List available backups
+pub fn list_backups() -> Result<Vec<(String, u64)>> {
+    let backup_dir = guild_dir().join("backups");
+    if !backup_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut backups: Vec<(String, u64)> = std::fs::read_dir(&backup_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "db").unwrap_or(false))
+        .map(|e| {
+            let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+            (e.file_name().to_string_lossy().to_string(), size)
+        })
+        .collect();
+    backups.sort();
+    Ok(backups)
+}
+
+/// Restore from a backup
+pub fn restore_backup(filename: &str) -> Result<()> {
+    let backup_dir = guild_dir().join("backups");
+    let backup_path = backup_dir.join(filename);
+
+    if !backup_path.exists() {
+        anyhow::bail!("Backup '{}' not found", filename);
+    }
+
+    let db = db_path();
+
+    // Create a safety backup of current DB first
+    if db.exists() {
+        let safety = backup_dir.join("pre-restore.db");
+        std::fs::copy(&db, &safety)?;
+    }
+
+    std::fs::copy(&backup_path, &db)?;
+    Ok(())
+}
+
 pub fn log_activity(
     conn: &Connection,
     actor: &str,

@@ -1,3 +1,4 @@
+mod config;
 mod goal;
 mod hero;
 mod init;
@@ -143,11 +144,38 @@ pub enum Command {
     #[command(subcommand)]
     Secret(secret::SecretCommand),
 
+    /// Activate a license key
+    Activate {
+        /// License key
+        key: String,
+    },
+
+    /// Manage configuration
+    #[command(subcommand)]
+    Config(config::ConfigCommand),
+
     /// Setup Telegram notifications
     SetupTelegram,
 
     /// Open local dashboard
     Dashboard,
+
+    /// Database backup management
+    #[command(subcommand)]
+    Backup(BackupCommand),
+
+    /// Check guild health
+    Doctor,
+}
+
+#[derive(Subcommand)]
+pub enum BackupCommand {
+    /// Create a backup now
+    Create,
+    /// List available backups
+    List,
+    /// Restore from a backup
+    Restore { filename: String },
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -172,6 +200,15 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Quests { project, status } => quest::run_list(project, status),
         Command::Assign { quest_id, hero_name } => quest::run_assign(quest_id, hero_name),
         Command::Secret(cmd) => secret::run(cmd),
+        Command::Activate { key } => {
+            crate::license::activate(&key)?;
+            let license = crate::license::License::load();
+            println!("{} License activated!", "+".green());
+            println!("  Tier: {:?}", license.tier);
+            println!("  Max heroes: {}", license.max_heroes);
+            Ok(())
+        }
+        Command::Config(cmd) => config::run(cmd),
         Command::SetupTelegram => run_setup_telegram(),
         Command::Locks => run_locks(),
         Command::Dashboard => {
@@ -190,6 +227,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
             crate::api::serve(7432, dashboard_dir)
         }
+        Command::Backup(cmd) => run_backup(cmd),
+        Command::Doctor => run_doctor(),
     }
 }
 
@@ -277,6 +316,191 @@ fn run_locks() -> Result<()> {
             );
         }
         println!("\n  {} lock(s) active.", locks.len());
+    }
+
+    Ok(())
+}
+
+fn run_backup(cmd: BackupCommand) -> Result<()> {
+    match cmd {
+        BackupCommand::Create => {
+            let name = db::backup()?;
+            println!("{} Backup created: {}", "+".green(), name.cyan());
+            Ok(())
+        }
+        BackupCommand::List => {
+            let backups = db::list_backups()?;
+            println!("{}", "DATABASE BACKUPS".yellow().bold());
+            println!("{}", "─".repeat(60));
+
+            if backups.is_empty() {
+                println!("  No backups found. Run {} to create one.", "guild backup create".cyan());
+            } else {
+                for (name, size) in &backups {
+                    let size_str = if *size > 1_048_576 {
+                        format!("{:.1} MB", *size as f64 / 1_048_576.0)
+                    } else {
+                        format!("{:.1} KB", *size as f64 / 1024.0)
+                    };
+                    println!("  {} ({})", name.cyan(), size_str.dimmed());
+                }
+                println!("\n  {} backup(s) available.", backups.len());
+            }
+            Ok(())
+        }
+        BackupCommand::Restore { filename } => {
+            println!(
+                "{} This will replace the current database with backup '{}'.",
+                "WARNING:".red().bold(),
+                filename.cyan()
+            );
+            println!("  A safety copy of the current DB will be saved as pre-restore.db.\n");
+
+            let confirm = dialoguer::Confirm::new()
+                .with_prompt("Proceed with restore?")
+                .default(false)
+                .interact()?;
+
+            if !confirm {
+                println!("  Restore cancelled.");
+                return Ok(());
+            }
+
+            db::restore_backup(&filename)?;
+            println!("{} Database restored from '{}'.", "+".green(), filename.cyan());
+            Ok(())
+        }
+    }
+}
+
+fn run_doctor() -> Result<()> {
+    println!("{}", "GUILD DOCTOR".yellow().bold());
+    println!("{}", "─".repeat(50));
+
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+
+    let guild_dir = db::guild_dir();
+
+    // 1. Check ~/.guild/ directory
+    if guild_dir.exists() {
+        println!("  {} Guild directory exists ({})", "✓".green(), guild_dir.display().to_string().dimmed());
+        passed += 1;
+    } else {
+        println!("  {} Guild directory missing ({})", "✗".red(), guild_dir.display().to_string().dimmed());
+        failed += 1;
+    }
+
+    // 2. Check guild.db exists and is readable
+    let db_path = db::db_path();
+    if db_path.exists() {
+        match db::open() {
+            Ok(conn) => {
+                match conn.query_row("SELECT count(*) FROM heroes", [], |row| row.get::<_, i64>(0)) {
+                    Ok(_) => {
+                        println!("  {} Database is readable ({})", "✓".green(), db_path.display().to_string().dimmed());
+                        passed += 1;
+                    }
+                    Err(e) => {
+                        println!("  {} Database query failed: {}", "✗".red(), e);
+                        failed += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                println!("  {} Cannot open database: {}", "✗".red(), e);
+                failed += 1;
+            }
+        }
+    } else {
+        println!("  {} Database not found ({})", "✗".red(), db_path.display().to_string().dimmed());
+        failed += 1;
+    }
+
+    // 3. Check workspace subdirectories
+    let workspace = guild_dir.join("workspace");
+    let subdirs = ["memory", "quests", "projects", "heroes", "inbox", "outbox"];
+    let mut all_exist = true;
+    for sub in &subdirs {
+        if !workspace.join(sub).exists() {
+            println!("  {} Workspace subdirectory missing: workspace/{}", "✗".red(), sub);
+            all_exist = false;
+            failed += 1;
+        }
+    }
+    if all_exist {
+        println!("  {} Workspace subdirectories present", "✓".green());
+        passed += 1;
+    }
+
+    // 4. Check Python 3
+    match std::process::Command::new("which").arg("python3").output() {
+        Ok(output) if output.status.success() => {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            println!("  {} Python 3 available ({})", "✓".green(), path.dimmed());
+            passed += 1;
+        }
+        _ => {
+            println!("  {} Python 3 not found", "✗".red());
+            failed += 1;
+        }
+    }
+
+    // 5. Check Git
+    match std::process::Command::new("which").arg("git").output() {
+        Ok(output) if output.status.success() => {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            println!("  {} Git available ({})", "✓".green(), path.dimmed());
+            passed += 1;
+        }
+        _ => {
+            println!("  {} Git not found", "✗".red());
+            failed += 1;
+        }
+    }
+
+    // 6. Check Anthropic API key
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        println!("  {} Anthropic API key is set", "✓".green());
+        passed += 1;
+    } else {
+        println!("  {} Anthropic API key not set (ANTHROPIC_API_KEY)", "✗".red());
+        failed += 1;
+    }
+
+    // 7. Check dashboard build
+    let dashboard_index = std::env::current_dir()
+        .ok()
+        .map(|d| d.join("dashboard").join("dist").join("index.html"));
+    if let Some(ref path) = dashboard_index {
+        if path.exists() {
+            println!("  {} Dashboard build found", "✓".green());
+            passed += 1;
+        } else {
+            println!("  {} Dashboard build missing (dashboard/dist/index.html)", "✗".red());
+            failed += 1;
+        }
+    } else {
+        println!("  {} Cannot determine dashboard path", "✗".red());
+        failed += 1;
+    }
+
+    // Summary
+    println!("\n{}", "─".repeat(50));
+    if failed == 0 {
+        println!(
+            "  {} All {} checks passed!",
+            "HEALTHY".green().bold(),
+            passed
+        );
+    } else {
+        println!(
+            "  {} {}/{} checks passed, {} failed.",
+            "ISSUES FOUND".red().bold(),
+            passed,
+            passed + failed,
+            failed
+        );
     }
 
     Ok(())

@@ -16,6 +16,9 @@ const HERO_CLASSES: &[(&str, &[&str])] = &[
 ];
 
 pub fn run_recruit(class: Option<String>, name: Option<String>) -> Result<()> {
+    let license = crate::license::License::load();
+    license.check_hero_limit()?;
+
     let conn = db::open()?;
 
     // Select class

@@ -1,14 +1,27 @@
 use anyhow::{bail, Result};
+use chrono::Utc;
 use colored::Colorize;
+use serde_json::Value;
 use std::fs;
 
 use crate::db;
 
 pub fn run(project: Option<String>) -> Result<()> {
     let guild_dir = db::guild_dir();
+    let first_init = !guild_dir.exists();
 
     if guild_dir.join("guild.db").exists() {
         bail!("Guild already initialized at {}", guild_dir.display());
+    }
+
+    if first_init {
+        println!();
+        println!("{}", "=== Welcome to Guild ===".green().bold());
+        println!();
+        println!("Guild is a self-hosted multi-agent development OS.");
+        println!("It lets you recruit AI heroes, assign quests, and manage");
+        println!("your development workflow from the command line.");
+        println!();
     }
 
     println!("{}", "[1/4] Creating guild workspace...".yellow());
@@ -48,15 +61,56 @@ pub fn run(project: Option<String>) -> Result<()> {
     // Log initialization
     db::log_activity(&conn, "system", "Guild initialized", None, None, "info")?;
 
+    // Write onboarding config for first-time init
+    if first_init {
+        let config_path = guild_dir.join("config.json");
+        let mut config: Value = if config_path.exists() {
+            let content = fs::read_to_string(&config_path)?;
+            serde_json::from_str(&content).unwrap_or(Value::Object(serde_json::Map::new()))
+        } else {
+            Value::Object(serde_json::Map::new())
+        };
+
+        let obj = config.as_object_mut().expect("config must be an object");
+        obj.insert("created_at".to_string(), Value::String(Utc::now().to_rfc3339()));
+        obj.insert("rookie_mode".to_string(), Value::Bool(true));
+
+        fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
+    }
+
     println!("{}", "[4/4] Done!".yellow());
     println!();
     println!("{}", "Guild initialized successfully.".green().bold());
     println!("  Location: {}", guild_dir.display());
     println!();
-    println!("Next steps:");
-    println!("  {} — register a project", "guild project add".cyan());
-    println!("  {} — recruit your first hero", "guild recruit".cyan());
-    println!("  {} — set your first goal", "guild goal \"...\"".cyan());
+
+    if first_init {
+        let license = crate::license::License::load();
+        println!("{}", "Getting Started:".yellow().bold());
+        println!("  1. {} — register a project", "guild project add".cyan());
+        println!("  2. {} — recruit your first hero", "guild recruit".cyan());
+        println!("  3. {} — set your first goal", "guild goal \"...\"".cyan());
+        println!("  4. {} — check guild status anytime", "guild status".cyan());
+        println!();
+        println!(
+            "  License: {:?} (max {} heroes). Use {} to upgrade.",
+            license.tier, license.max_heroes, "guild activate <key>".cyan()
+        );
+        println!();
+        println!(
+            "  {} Rookie mode is active. You will see extra guidance for the",
+            "NOTE:".yellow().bold()
+        );
+        println!(
+            "  first 7 days. Run {} to disable it early.",
+            "guild config skip-rookie".cyan()
+        );
+    } else {
+        println!("Next steps:");
+        println!("  {} — register a project", "guild project add".cyan());
+        println!("  {} — recruit your first hero", "guild recruit".cyan());
+        println!("  {} — set your first goal", "guild goal \"...\"".cyan());
+    }
 
     if let Some(path) = project {
         println!();

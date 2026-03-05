@@ -1,6 +1,7 @@
 mod api;
 mod cli;
 mod db;
+mod license;
 mod process_manager;
 
 use anyhow::Result;
