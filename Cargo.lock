@@ -321,6 +321,7 @@ dependencies = [
  "colored",
  "dialoguer",
  "dirs",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

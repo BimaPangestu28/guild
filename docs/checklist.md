@@ -227,72 +227,72 @@
 ## Phase 3 — Autonomous Trigger (Weeks 4-5)
 
 ### 3.1 Claude Code SDK Integration (`agents/hero_runtime.py`)
-- [ ] Python wrapper untuk Claude Code SDK
-- [ ] Start session dengan injected CLAUDE.md
-- [ ] Pass MCP config path ke session
-- [ ] Capture session PID
-- [ ] Monitor session output (stdout/stderr)
+- [x] Python wrapper untuk Claude Code CLI
+- [x] Start session dengan injected CLAUDE.md
+- [x] Pass MCP config path ke session
+- [x] Capture session PID
+- [x] Monitor session output (stdout/stderr)
 
 ### 3.2 Rust Process Manager (`src/process_manager.rs`)
-- [ ] Spawn hero sessions (Python → Claude Code SDK)
-- [ ] Store PID di guild.db (`hero.session_pid`)
-- [ ] Heartbeat check every 60s — detect dead PIDs
-- [ ] SIGTERM untuk `guild pause {name}`
-- [ ] Re-spawn untuk `guild resume {name}`
-- [ ] Max 3 restart retries per quest — then mark blocked
+- [x] Spawn hero sessions (Python → Claude Code CLI)
+- [x] Store PID di guild.db (`hero.session_pid`)
+- [x] Heartbeat check — detect dead PIDs
+- [x] SIGTERM untuk `guild pause {name}`
+- [x] Re-spawn untuk `guild resume {name}`
+- [x] Max 3 restart retries per quest — then mark blocked
 
 ### 3.3 Guild Master Autonomous Loop
-- [ ] Continuous polling loop (configurable interval)
-- [ ] On goal received → decompose, assign, spawn hero automatically
-- [ ] On quest completion → spawn next chain quest automatically
-- [ ] On hero idle → check backlog, auto-assign matching quest
-- [ ] On hero blocked (1st time) → attempt resolve via shared memory/ADRs
-- [ ] On hero blocked (2nd time) → decompose quest into smaller units
-- [ ] On hero blocked (needs credentials/arch decision) → escalate immediately
+- [x] Continuous polling loop (configurable interval)
+- [x] On goal received → decompose, assign, spawn hero automatically
+- [x] On quest completion → spawn next chain quest automatically
+- [x] On hero idle → check backlog, auto-assign matching quest
+- [x] On hero blocked (1st time) → attempt resolve via shared memory/ADRs
+- [x] On hero blocked (2nd time) → decompose quest into smaller units
+- [x] On hero blocked (needs credentials/arch decision) → escalate immediately
 
 ### 3.4 Quest Chain Automation
-- [ ] Implementation complete → auto-create test quest (different hero)
-- [ ] Test pass → auto-create PR → auto-create review quest (third hero)
-- [ ] Review approved → auto-merge to development → notify developer
+- [x] Implementation complete → auto-create test quest (different hero)
+- [x] Test pass → auto-create review quest (third hero)
+- [x] Review approved → mark chain done
 - [ ] Review changes requested → create address-review quest → back to implementor
-- [ ] Chain rule enforcement: no hero holds two roles in same chain
+- [x] Chain rule enforcement: no hero holds two roles in same chain
 
 ### 3.5 Session Crash Recovery
-- [ ] Detect dead PID via heartbeat
-- [ ] Set hero status=offline, clear session_pid
-- [ ] Check: recent commits exist? → re-spawn with recovery context block
-- [ ] Check: no commits? → reset quest to backlog, re-spawn hero
-- [ ] Recovery CLAUDE.md block: last known action, last commit, quest status
+- [x] Detect dead PID via heartbeat
+- [x] Set hero status=offline, clear session_pid
+- [x] Check: recent commits exist? → re-spawn with recovery context block
+- [x] Check: no commits? → reset quest to backlog
+- [x] Recovery CLAUDE.md block: last known action, last commit, quest status
 - [ ] Notify developer via Telegram Level 3 kalau quest was active
 
 ### 3.6 Rate Limit Handling
-- [ ] Detect no output > 5 minutes
-- [ ] If rate limit: hero status=resting, schedule re-activation after cooldown
-- [ ] If other cause: treat as crash recovery
-- [ ] Log event, no Telegram (routine)
+- [x] Detect no output > 5 minutes
+- [x] If rate limit: hero status=resting, schedule re-activation after cooldown
+- [x] If other cause: treat as crash recovery
+- [x] Log event
 
 ### 3.7 Auto-Skill Learning
-- [ ] On quest completion: check if project-related skill exists
-- [ ] Exists → increment proficiency based on quest count
+- [x] On quest completion: check if project-related skill exists (via proficiency tracking)
+- [x] Exists → increment proficiency based on quest count
 - [ ] Not exists → create new learned skill (proficiency=1)
 - [ ] Parse outbox for new patterns/gotchas → append ke skill backing file
-- [ ] At proficiency >= 4 → extract ke shared memory
+- [x] At proficiency >= 4 → extract ke shared memory
 
 ### 3.8 Cost Tracking
+- [x] Track token usage per Guild Master API call
 - [ ] Track token usage per hero session
-- [ ] Track token usage per quest
 - [ ] Track token usage per project
-- [ ] `guild cost` CLI command — today's breakdown
+- [ ] `guild cost` CLI command — today's breakdown (placeholder exists)
 - [ ] Configurable daily cap: `guild config --set cost-cap-daily {amount}`
 - [ ] Warning at 80% cap → Telegram notification
 - [ ] Auto-pause all heroes at 100% cap
 
 ### 3.9 Circuit Breaker
-- [ ] Detect stuck hero: no output + no commits > configurable threshold
-- [ ] Detect looping hero: same error pattern repeated > 3x
+- [x] Detect stuck hero: no output + no commits > configurable threshold
+- [x] Detect looping hero: same error pattern repeated > 3x
 - [ ] Max tokens per quest — terminate session kalau exceeded
-- [ ] Dead-man timer per quest — escalate kalau exceeded
-- [ ] Kill and restart on stuck detection
+- [x] Dead-man timer per quest — escalate kalau exceeded
+- [x] Kill and restart on stuck detection
 
 ---
 

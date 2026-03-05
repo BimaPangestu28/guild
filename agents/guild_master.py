@@ -17,8 +17,14 @@ from pathlib import Path
 
 import anthropic
 
-from memory_manager import route_learnings, update_proficiency
+from memory_manager import read_shared_memory, route_learnings, update_proficiency
 
+
+# ---------------------------------------------------------------------------
+# Cost tracking — session-level API call counter
+# ---------------------------------------------------------------------------
+_session_api_calls = 0
+_session_token_total = 0
 
 GUILD_DIR = Path.home() / ".guild"
 DB_PATH = GUILD_DIR / "guild.db"
@@ -370,12 +376,25 @@ def process_hero_report(conn, hero_name, content):
 
 def call_guild_master(client, context):
     """Call Claude API for Guild Master decisions."""
+    global _session_api_calls, _session_token_total
+
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4096,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context}],
     )
+
+    # Track cost
+    _session_api_calls += 1
+    tokens_used = getattr(response.usage, "input_tokens", 0) + getattr(response.usage, "output_tokens", 0)
+    _session_token_total += tokens_used
+    try:
+        conn = get_db()
+        log_cost(conn, "guild-master", tokens_used)
+        conn.close()
+    except Exception:
+        pass  # Don't let cost logging break the main flow
 
     text = response.content[0].text
 
@@ -392,6 +411,292 @@ def call_guild_master(client, context):
         return None
 
 
+def log_cost(conn, actor, tokens, quest_id=None):
+    """Log estimated token usage to activity_log."""
+    log_activity(conn, actor, f"api_cost: {tokens} tokens", quest_id=quest_id)
+
+
+def find_best_hero(conn, req_skills, exclude_hero_ids=None):
+    """Find the best available hero matching required skills.
+
+    Considers heroes with status in ('idle', 'offline') that have no current quest.
+    Scores each by skill overlap with *req_skills*.
+    Returns the hero Row with the best match, or None.
+    """
+    if exclude_hero_ids is None:
+        exclude_hero_ids = set()
+    else:
+        exclude_hero_ids = set(exclude_hero_ids)
+
+    heroes = conn.execute(
+        "SELECT h.id, h.name, h.class, h.status, h.level, h.current_quest_id, "
+        "GROUP_CONCAT(s.name, ',') as skills "
+        "FROM heroes h LEFT JOIN hero_skills s ON h.id = s.hero_id "
+        "WHERE h.status IN ('idle', 'offline') AND h.current_quest_id IS NULL "
+        "GROUP BY h.id"
+    ).fetchall()
+
+    req_set = set(s.lower() for s in req_skills) if req_skills else set()
+    best = None
+    best_score = -1
+
+    for hero in heroes:
+        if hero["id"] in exclude_hero_ids:
+            continue
+        hero_skills = set(
+            s.strip().lower() for s in (hero["skills"] or "").split(",") if s.strip()
+        )
+        score = len(req_set & hero_skills) if req_set else 0
+        if score > best_score:
+            best_score = score
+            best = hero
+
+    return best
+
+
+# ---------------------------------------------------------------------------
+# Quest chain automation helpers
+# ---------------------------------------------------------------------------
+
+_CHAIN_SEQUENCE = {"feature": "test", "bugfix": "test", "test": "review", "refactor": "test"}
+
+
+def _get_chain_hero_ids(conn, chain_id):
+    """Return set of hero IDs already assigned to quests in a chain."""
+    rows = conn.execute(
+        "SELECT DISTINCT assigned_to FROM quests WHERE chain_id = ? AND assigned_to IS NOT NULL",
+        (chain_id,),
+    ).fetchall()
+    return {r["assigned_to"] for r in rows}
+
+
+def _auto_create_next_quest(conn, completed_quest, client):
+    """If the completed quest is part of a sequence, create the next quest in the chain."""
+    quest_type = completed_quest["type"]
+    next_type = _CHAIN_SEQUENCE.get(quest_type)
+    if not next_type:
+        # review completed (or other terminal type) → mark chain done
+        if quest_type == "review":
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "UPDATE quest_chains SET status = 'done', completed_at = ? WHERE id = ?",
+                (now, completed_quest["chain_id"]),
+            )
+            log_activity(conn, "guild-master", f"Chain {completed_quest['chain_id'][:8]} completed",
+                         project_id=completed_quest["project_id"])
+            print(f"  >> Chain {completed_quest['chain_id'][:8]} completed")
+            conn.commit()
+        return
+
+    chain_id = completed_quest["chain_id"]
+    exclude_ids = _get_chain_hero_ids(conn, chain_id)
+
+    req_skills = json.loads(completed_quest["req_skills"]) if completed_quest["req_skills"] else []
+    hero = find_best_hero(conn, req_skills, exclude_hero_ids=exclude_ids)
+
+    quest_id = f"GLD-{uuid.uuid4().hex[:6].upper()}"
+    now = datetime.now(timezone.utc).isoformat()
+    title = f"[{next_type}] {completed_quest['title']}"
+    description = (
+        f"Auto-generated {next_type} quest following completion of {completed_quest['id']}.\n\n"
+        f"Original quest: {completed_quest['title']}\n"
+        f"Branch: {completed_quest['branch']}\n"
+    )
+    branch = f"{next_type}/{quest_id[-6:]}-{completed_quest['branch'].split('/')[-1] if '/' in completed_quest['branch'] else completed_quest['branch']}"
+
+    conn.execute(
+        "INSERT INTO quests (id, chain_id, parent_quest_id, title, description, tier, type, status, "
+        "project_id, branch, req_skills, assigned_to, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            quest_id, chain_id, completed_quest["id"],
+            title, description,
+            completed_quest["tier"], next_type,
+            "active" if hero else "backlog",
+            completed_quest["project_id"],
+            branch,
+            completed_quest["req_skills"],
+            hero["id"] if hero else None,
+            now,
+        ),
+    )
+
+    log_activity(conn, "guild-master",
+                 f"Auto-created {next_type} quest {quest_id} in chain {chain_id[:8]}",
+                 quest_id=quest_id, project_id=completed_quest["project_id"])
+    print(f"  >> Auto-created [{quest_id}] {next_type} quest in chain {chain_id[:8]}")
+
+    if hero:
+        conn.execute(
+            "UPDATE heroes SET status = 'on_quest', current_quest_id = ? WHERE id = ?",
+            (quest_id, hero["id"]),
+        )
+        # Write quest brief to hero inbox
+        brief = f"## Quest: {title}\nID: {quest_id}\nBranch: {branch}\n"
+        brief += f"Tier: {completed_quest['tier']} | Type: {next_type}\n\n{description}\n"
+        hero_inbox = INBOX / f"{hero['name']}.md"
+        hero_inbox.write_text(brief)
+        log_activity(conn, "guild-master", f"Assigned chain quest {quest_id} to {hero['name']}", quest_id=quest_id)
+        print(f"  -> Assigned [{quest_id}] to {hero['name']}")
+
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Auto-assign idle heroes to backlog quests
+# ---------------------------------------------------------------------------
+
+def _auto_assign_idle_heroes(conn):
+    """Match idle heroes to unassigned backlog quests by skill overlap."""
+    backlog_quests = conn.execute(
+        "SELECT * FROM quests WHERE status = 'backlog' AND assigned_to IS NULL "
+        "ORDER BY created_at ASC"
+    ).fetchall()
+
+    if not backlog_quests:
+        return
+
+    for quest in backlog_quests:
+        req_skills = json.loads(quest["req_skills"]) if quest["req_skills"] else []
+        hero = find_best_hero(conn, req_skills)
+        if not hero:
+            continue
+
+        conn.execute("UPDATE quests SET assigned_to = ?, status = 'active' WHERE id = ?",
+                     (hero["id"], quest["id"]))
+        conn.execute("UPDATE heroes SET status = 'on_quest', current_quest_id = ? WHERE id = ?",
+                     (quest["id"], hero["id"]))
+
+        # Write quest brief
+        brief = f"## Quest: {quest['title']}\nID: {quest['id']}\nBranch: {quest['branch']}\n"
+        brief += f"Tier: {quest['tier']} | Type: {quest['type']}\n\n{quest['description']}\n"
+        hero_inbox = INBOX / f"{hero['name']}.md"
+        hero_inbox.write_text(brief)
+
+        log_activity(conn, "guild-master",
+                     f"Auto-assigned quest {quest['id']} to {hero['name']} (skill match)",
+                     quest_id=quest["id"], project_id=quest["project_id"])
+        print(f"  -> Auto-assigned [{quest['id']}] to {hero['name']}")
+
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Blocked quest handling
+# ---------------------------------------------------------------------------
+
+def _get_block_count(conn, quest_id):
+    """Count how many times a quest has been blocked (via activity_log)."""
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM activity_log "
+        "WHERE quest_id = ? AND action LIKE '%blocked%' AND level = 'warning'",
+        (quest_id,),
+    ).fetchone()
+    return row["cnt"] if row else 0
+
+
+def _handle_blocked_quests(conn, client):
+    """Handle blocked quests with escalating strategies."""
+    blocked = conn.execute(
+        "SELECT q.*, h.name as hero_name, h.id as hero_id "
+        "FROM quests q LEFT JOIN heroes h ON q.assigned_to = h.id "
+        "WHERE q.status = 'blocked'"
+    ).fetchall()
+
+    for quest in blocked:
+        block_count = _get_block_count(conn, quest["id"])
+
+        if block_count <= 1:
+            # First block: enrich with shared memory context, reassign
+            project_row = conn.execute(
+                "SELECT name FROM projects WHERE id = ?", (quest["project_id"],)
+            ).fetchone()
+            extra_context = ""
+            if project_row:
+                shared = read_shared_memory(project_row["name"])
+                if shared:
+                    extra_context = f"\n\n--- Shared Memory Context ---\n{shared[:2000]}"
+
+            if extra_context:
+                new_desc = quest["description"] + extra_context
+                conn.execute("UPDATE quests SET description = ?, status = 'active' WHERE id = ?",
+                             (new_desc, quest["id"]))
+                log_activity(conn, "guild-master",
+                             f"Unblocked quest {quest['id']} with shared memory context",
+                             quest_id=quest["id"], level="info")
+                print(f"  >> Enriched blocked quest [{quest['id']}] with shared memory")
+            else:
+                # No shared memory available, just reset to active
+                conn.execute("UPDATE quests SET status = 'active' WHERE id = ?", (quest["id"],))
+                log_activity(conn, "guild-master",
+                             f"Reset blocked quest {quest['id']} to active (no extra context available)",
+                             quest_id=quest["id"], level="info")
+
+        elif block_count == 2:
+            # Second block: decompose into sub-quests via LLM
+            decompose_prompt = (
+                f"A quest is blocked for the second time. Decompose it into 2-3 smaller sub-quests.\n\n"
+                f"Quest: {quest['title']}\nDescription: {quest['description']}\n"
+                f"Tier: {quest['tier']} | Type: {quest['type']}\n\n"
+                f"Respond with JSON: {{\"sub_quests\": [{{\"title\": ..., \"description\": ..., "
+                f"\"tier\": \"COMMON\", \"quest_type\": \"{quest['type']}\", "
+                f"\"req_skills\": [...]}}]}}"
+            )
+            result = call_guild_master(client, decompose_prompt)
+            if result and "sub_quests" in result:
+                for sq in result["sub_quests"]:
+                    sub_id = f"GLD-{uuid.uuid4().hex[:6].upper()}"
+                    now = datetime.now(timezone.utc).isoformat()
+                    branch = f"{sq.get('quest_type', quest['type'])}/{sub_id[-6:]}-sub"
+                    conn.execute(
+                        "INSERT INTO quests (id, chain_id, parent_quest_id, title, description, tier, type, "
+                        "status, project_id, branch, req_skills, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?)",
+                        (
+                            sub_id, quest["chain_id"], quest["id"],
+                            sq.get("title", "Sub-quest"),
+                            sq.get("description", ""),
+                            sq.get("tier", "COMMON"),
+                            sq.get("quest_type", quest["type"]),
+                            quest["project_id"], branch,
+                            json.dumps(sq.get("req_skills", [])),
+                            now,
+                        ),
+                    )
+                    log_activity(conn, "guild-master",
+                                 f"Decomposed blocked quest {quest['id']} -> sub-quest {sub_id}",
+                                 quest_id=sub_id, project_id=quest["project_id"])
+                    print(f"  >> Decomposed [{quest['id']}] -> sub-quest [{sub_id}]")
+
+                # Mark original as superseded
+                conn.execute("UPDATE quests SET status = 'done', result = 'decomposed' WHERE id = ?",
+                             (quest["id"],))
+                if quest["hero_id"]:
+                    conn.execute(
+                        "UPDATE heroes SET status = 'idle', current_quest_id = NULL WHERE id = ?",
+                        (quest["hero_id"],),
+                    )
+
+        else:
+            # Third+ block: escalate
+            log_activity(conn, "guild-master",
+                         f"ESCALATION: Quest {quest['id']} blocked {block_count} times — requires manual intervention",
+                         quest_id=quest["id"], project_id=quest["project_id"], level="critical")
+            print(f"  !! ESCALATION: [{quest['id']}] blocked {block_count} times")
+            # Write to GM outbox for developer attention
+            gm_outbox = OUTBOX / "guild-master.md"
+            escalation_msg = (
+                f"\n\n## ESCALATION — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+                f"Quest [{quest['id']}] \"{quest['title']}\" has been blocked {block_count} times.\n"
+                f"Assigned to: {quest['hero_name'] or 'unassigned'}\n"
+                f"Manual intervention required.\n"
+            )
+            existing = gm_outbox.read_text() if gm_outbox.exists() else ""
+            gm_outbox.write_text(existing + escalation_msg)
+
+    conn.commit()
+
+
 def run_cycle(client):
     """Run one Guild Master cycle."""
     conn = get_db()
@@ -406,6 +711,19 @@ def run_cycle(client):
     for report in hero_reports:
         process_hero_report(conn, report["hero"], report["content"])
 
+    # Quest chain automation: check for newly completed quests that are part of a chain
+    completed_quests = conn.execute(
+        "SELECT * FROM quests WHERE status = 'done' AND completed_at IS NOT NULL "
+        "AND chain_id IS NOT NULL AND type IN ('feature', 'bugfix', 'test', 'review', 'refactor')"
+    ).fetchall()
+    for cq in completed_quests:
+        # Only process if no successor quest already exists for this quest
+        existing_next = conn.execute(
+            "SELECT id FROM quests WHERE parent_quest_id = ?", (cq["id"],)
+        ).fetchone()
+        if not existing_next:
+            _auto_create_next_quest(conn, cq, client)
+
     # If there's a new goal, call LLM to decompose
     if inbox_content:
         print(f"\n📜 New goal received")
@@ -414,6 +732,12 @@ def run_cycle(client):
         if response_data:
             print(f"  Analysis: {response_data.get('analysis', 'N/A')}")
             process_actions(conn, response_data)
+
+    # Auto-assign idle heroes to unassigned backlog quests
+    _auto_assign_idle_heroes(conn)
+
+    # Handle blocked quests (escalating strategy)
+    _handle_blocked_quests(conn, client)
 
     conn.close()
 

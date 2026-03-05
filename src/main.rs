@@ -1,5 +1,6 @@
 mod cli;
 mod db;
+mod process_manager;
 
 use anyhow::Result;
 use clap::Parser;

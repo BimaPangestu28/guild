@@ -3,6 +3,7 @@ use chrono::Utc;
 use colored::Colorize;
 
 use crate::db;
+use crate::process_manager;
 
 const HERO_CLASSES: &[(&str, &[&str])] = &[
     ("Rust Sorcerer", &["rust", "wasm", "systems", "performance"]),
@@ -388,6 +389,11 @@ fn run_start(hero_id: &str, hero_name: &str, hero_class: &str, conn: &rusqlite::
 
     println!();
     println!("CLAUDE.md written to: {}", claude_md_path.display().to_string().dimmed());
+    println!();
+    println!("{}", "Auto-spawn (experimental):".yellow());
+    println!("  To auto-spawn via process manager instead, set GUILD_AGENTS_DIR and run:");
+    println!("  {}", format!("guild hero {} --start  # with GUILD_AGENTS_DIR set", hero_name).dimmed());
+    println!("  This will launch hero_runtime.py as a background process (PID tracked in DB).");
 
     Ok(())
 }
@@ -395,9 +401,36 @@ fn run_start(hero_id: &str, hero_name: &str, hero_class: &str, conn: &rusqlite::
 pub fn run_pause(name: Option<String>, all: bool) -> Result<()> {
     let conn = db::open()?;
     if all {
+        // Stop all active sessions via process manager
+        let mut stmt = conn.prepare(
+            "SELECT name, session_pid FROM heroes WHERE session_pid IS NOT NULL"
+        )?;
+        let active: Vec<(String, i64)> = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?.filter_map(|r| r.ok()).collect();
+
+        for (hero, _pid) in &active {
+            if let Err(e) = process_manager::stop_session(hero) {
+                eprintln!("Warning: could not stop session for '{}': {}", hero, e);
+            }
+        }
+
         conn.execute("UPDATE heroes SET status = 'offline' WHERE status != 'offline'", [])?;
         println!("{} All heroes paused", "✓".green());
     } else if let Some(n) = name {
+        // If hero has an active session, stop it via process manager
+        let has_pid: Option<i64> = conn.query_row(
+            "SELECT session_pid FROM heroes WHERE name = ?1",
+            [&n],
+            |row| row.get(0),
+        ).ok().flatten();
+
+        if has_pid.is_some() {
+            if let Err(e) = process_manager::stop_session(&n) {
+                eprintln!("Warning: could not stop session for '{}': {}", n, e);
+            }
+        }
+
         let updated = conn.execute(
             "UPDATE heroes SET status = 'offline' WHERE name = ?1",
             [&n],
@@ -413,7 +446,24 @@ pub fn run_pause(name: Option<String>, all: bool) -> Result<()> {
 pub fn run_resume(name: Option<String>, all: bool) -> Result<()> {
     let conn = db::open()?;
     if all {
+        // Resume all offline heroes; attempt to restart sessions for those that had PIDs
+        let mut stmt = conn.prepare(
+            "SELECT name FROM heroes WHERE status = 'offline'"
+        )?;
+        let heroes: Vec<String> = stmt.query_map([], |row| {
+            row.get::<_, String>(0)
+        })?.filter_map(|r| r.ok()).collect();
+
         conn.execute("UPDATE heroes SET status = 'idle' WHERE status = 'offline'", [])?;
+
+        for hero in &heroes {
+            // Try to restart session via process manager
+            match process_manager::start_session(hero) {
+                Ok(pid) => println!("  {} session restarted (PID: {})", hero, pid),
+                Err(_) => {} // Session restart is best-effort
+            }
+        }
+
         println!("{} All heroes resumed", "✓".green());
     } else if let Some(n) = name {
         let updated = conn.execute(
@@ -421,6 +471,13 @@ pub fn run_resume(name: Option<String>, all: bool) -> Result<()> {
             [&n],
         )?;
         if updated == 0 { bail!("Hero '{}' not found or not offline", n); }
+
+        // Try to restart session via process manager
+        match process_manager::start_session(&n) {
+            Ok(pid) => println!("  Session restarted (PID: {})", pid),
+            Err(_) => {} // Session restart is best-effort
+        }
+
         println!("{} Hero '{}' resumed", "✓".green(), n);
     } else {
         bail!("Specify a hero name or use --all");
