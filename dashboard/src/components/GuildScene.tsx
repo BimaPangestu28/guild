@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import AnimatedSprite from './AnimatedSprite';
-import { heroes } from '../data/mock';
+import type { Hero } from '../data/mock';
 
 // Display size for heroes in the scene (scaled down from sprite strip)
 const DISPLAY_SCALE = 0.55;
@@ -13,11 +13,45 @@ const heroPositions: Record<string, { x: number; y: number }> = {
   h4: { x: 55, y: 78 },
 };
 
+// Default positions for heroes beyond the first 4
+const extraPositions = [
+  { x: 45, y: 72 },
+  { x: 35, y: 75 },
+  { x: 52, y: 65 },
+  { x: 48, y: 80 },
+];
+
+// Map hero class to sprite info when API data lacks sprite fields
+const classSpriteMap: Record<string, { sprite: string; frames: number; frameWidth: number; frameHeight: number }> = {
+  'Rust Sorcerer': { sprite: 'mage1-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 },
+  'Mage': { sprite: 'mage2-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 },
+  'Node Assassin': { sprite: 'fighter-sword-idle.png', frames: 3, frameWidth: 192, frameHeight: 192 },
+  'Frontend Archer': { sprite: 'fighter2-idle.png', frames: 12, frameWidth: 96, frameHeight: 96 },
+  'Python Sage': { sprite: 'mage3-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 },
+  'Data Shaman': { sprite: 'mage4-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 },
+  'ML Engineer': { sprite: 'citizen1-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 },
+  'DevOps Paladin': { sprite: 'fighter2-idle.png', frames: 12, frameWidth: 96, frameHeight: 96 },
+};
+
+// Fallback sprite mapping by keyword
+function resolveSprite(heroClass: string) {
+  if (classSpriteMap[heroClass]) return classSpriteMap[heroClass];
+  const lc = heroClass.toLowerCase();
+  if (lc.includes('mage') || lc.includes('sorcerer') || lc.includes('wizard'))
+    return { sprite: 'mage1-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 };
+  if (lc.includes('assassin') || lc.includes('archer') || lc.includes('fighter') || lc.includes('paladin'))
+    return { sprite: 'fighter-sword-idle.png', frames: 3, frameWidth: 192, frameHeight: 192 };
+  if (lc.includes('sage') || lc.includes('shaman') || lc.includes('engineer'))
+    return { sprite: 'citizen1-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 };
+  return { sprite: 'citizen2-idle.png', frames: 3, frameWidth: 192, frameHeight: 156 };
+}
+
 interface Props {
+  heroes: Hero[];
   onHeroClick: (heroId: string) => void;
 }
 
-export default function GuildScene({ onHeroClick }: Props) {
+export default function GuildScene({ heroes, onHeroClick }: Props) {
   const [hoveredHero, setHoveredHero] = useState<string | null>(null);
 
   return (
@@ -29,19 +63,21 @@ export default function GuildScene({ onHeroClick }: Props) {
         style={{ height: '100%', maxWidth: '140%' }}
       />
 
-      {heroes.map((hero) => {
-        const pos = heroPositions[hero.id];
+      {heroes.map((hero, idx) => {
+        const pos = heroPositions[hero.id] ?? extraPositions[idx % extraPositions.length];
         if (!pos) return null;
 
+        // Use hero's own sprite data if present, otherwise resolve from class
+        const spriteInfo = hero.sprite ? hero : { ...resolveSprite(hero.class), sprite: hero.sprite || resolveSprite(hero.class).sprite };
         const isOffline = hero.status === 'offline';
-        const displayW = Math.round(hero.frameWidth * DISPLAY_SCALE);
-        const displayH = Math.round(hero.frameHeight * DISPLAY_SCALE);
+        const displayW = Math.round(spriteInfo.frameWidth * DISPLAY_SCALE);
+        const displayH = Math.round(spriteInfo.frameHeight * DISPLAY_SCALE);
 
         return (
           <div key={hero.id}>
             <AnimatedSprite
-              src={`/assets/sprites/sliced/${hero.sprite}`}
-              frames={hero.frames}
+              src={`/assets/sprites/sliced/${spriteInfo.sprite}`}
+              frames={spriteInfo.frames}
               frameWidth={displayW}
               frameHeight={displayH}
               fps={isOffline ? 0 : 5}

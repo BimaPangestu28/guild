@@ -1,11 +1,15 @@
 import { useState } from 'react';
-import { quests, heroes } from '../data/mock';
+import type { Quest, Hero } from '../data/mock';
 
-interface Props { onClose: () => void; }
+interface Props {
+  quests: Quest[];
+  heroes: Hero[];
+  onClose: () => void;
+}
 
 const tabs = ['all', 'active', 'backlog', 'blocked', 'done'] as const;
 
-export default function QuestPanel({ onClose }: Props) {
+export default function QuestPanel({ quests, heroes, onClose }: Props) {
   const [filter, setFilter] = useState<string>('all');
   const filtered = filter === 'all' ? quests : quests.filter(q => q.status === filter);
 

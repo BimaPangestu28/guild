@@ -1,8 +1,12 @@
-import { projects, quests } from '../data/mock';
+import type { Project, Quest } from '../data/mock';
 
-interface Props { onClose: () => void; }
+interface Props {
+  projects: Project[];
+  quests: Quest[];
+  onClose: () => void;
+}
 
-export default function ProjectPanel({ onClose }: Props) {
+export default function ProjectPanel({ projects, quests, onClose }: Props) {
   return (
     <div className="game-panel panel-center">
       <div className="panel-header">

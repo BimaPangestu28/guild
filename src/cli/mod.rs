@@ -175,8 +175,20 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::SetupTelegram => run_setup_telegram(),
         Command::Locks => run_locks(),
         Command::Dashboard => {
-            println!("Opening dashboard at http://localhost:7432 ...");
-            Ok(())
+            // Look for dashboard static files
+            let dashboard_dir = std::env::current_dir()
+                .ok()
+                .map(|d| d.join("dashboard").join("dist"))
+                .filter(|d| d.is_dir())
+                .or_else(|| {
+                    // Fallback: check next to the executable
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|e| e.parent().map(|p| p.join("dashboard").join("dist")))
+                        .filter(|d| d.is_dir())
+                });
+
+            crate::api::serve(7432, dashboard_dir)
         }
     }
 }

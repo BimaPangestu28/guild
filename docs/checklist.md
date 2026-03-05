@@ -452,9 +452,12 @@
 ### 6.1 Dashboard API Layer
 - [x] Setup React project di `dashboard/`
 - [ ] Bundle into Rust binary at build time (no Node.js required on user machine)
-- [ ] `guild dashboard` → serve di localhost:7432
-- [ ] API layer: Rust serves JSON endpoints dari guild.db
-- [ ] Replace mock data with real API calls
+- [x] `guild dashboard` → serve di localhost:7432
+- [x] API layer: Rust serves JSON endpoints dari guild.db (tiny_http)
+- [x] Replace mock data with real API calls (usePolling hook)
+- [x] API endpoints: /api/status, /api/heroes, /api/quests, /api/projects, /api/log, /api/locks, /api/mcps
+- [x] Static file serving with SPA fallback
+- [x] CORS headers on all API responses
 
 ### 6.2 Dashboard Components
 - [x] `GuildScene.tsx` — main game-like guild hall view with animated sprites
@@ -463,12 +466,12 @@
 - [x] `MemoryPanel.tsx` — memory browser panel
 - [x] `LogPanel.tsx` — activity log panel
 - [x] `ProjectPanel.tsx` — project panel
-- [ ] Wire all panels to real API data
+- [x] Wire all panels to real API data (with mock fallback)
 
 ### 6.3 Real-Time Updates
-- [ ] Polling atau WebSocket untuk live hero status
-- [ ] Quest status changes reflected in real-time
-- [ ] Activity log auto-refresh
+- [x] Polling (5s interval) untuk live hero status, quests, projects, log
+- [x] Quest status changes reflected via polling
+- [x] Activity log auto-refresh
 - [ ] Queued Telegram notifications visible in dashboard
 
 ### 6.4 License System

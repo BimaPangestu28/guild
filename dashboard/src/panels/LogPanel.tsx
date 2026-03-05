@@ -1,8 +1,11 @@
-import { activityLog } from '../data/mock';
+import type { ActivityEntry } from '../data/mock';
 
-interface Props { onClose: () => void; }
+interface Props {
+  log: ActivityEntry[];
+  onClose: () => void;
+}
 
-export default function LogPanel({ onClose }: Props) {
+export default function LogPanel({ log, onClose }: Props) {
   return (
     <div className="game-panel panel-right">
       <div className="panel-header">
@@ -10,7 +13,7 @@ export default function LogPanel({ onClose }: Props) {
         <button className="panel-close" onClick={onClose}>x</button>
       </div>
       <div className="panel-body">
-        {activityLog.map(entry => (
+        {log.map(entry => (
           <div key={entry.id} className={`log-entry ${entry.level}`}>
             <span className="log-time">
               {new Date(entry.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}

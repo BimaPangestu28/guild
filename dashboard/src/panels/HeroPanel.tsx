@@ -1,11 +1,13 @@
-import { heroes, quests } from '../data/mock';
+import type { Hero, Quest } from '../data/mock';
 
 interface Props {
+  heroes: Hero[];
+  quests: Quest[];
   selectedHero: string | null;
   onClose: () => void;
 }
 
-export default function HeroPanel({ selectedHero, onClose }: Props) {
+export default function HeroPanel({ heroes, quests, selectedHero, onClose }: Props) {
   const selected = selectedHero ? heroes.find(h => h.id === selectedHero) : null;
 
   return (
