@@ -1,9 +1,11 @@
 mod goal;
 mod hero;
 mod init;
+mod mcp;
 mod memory;
 mod project;
 mod quest;
+pub mod secret;
 mod skill;
 mod status;
 
@@ -110,6 +112,10 @@ pub enum Command {
     #[command(subcommand)]
     Skill(skill::SkillCommand),
 
+    /// Manage MCP servers
+    #[command(subcommand)]
+    Mcp(mcp::McpCommand),
+
     /// Manage quests
     #[command(subcommand)]
     Quest(quest::QuestCommand),
@@ -133,6 +139,13 @@ pub enum Command {
     /// Show active file locks
     Locks,
 
+    /// Manage secrets
+    #[command(subcommand)]
+    Secret(secret::SecretCommand),
+
+    /// Setup Telegram notifications
+    SetupTelegram,
+
     /// Open local dashboard
     Dashboard,
 }
@@ -154,15 +167,82 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Resume { name, all } => hero::run_resume(name, all),
         Command::Memory(cmd) => memory::run(cmd),
         Command::Skill(cmd) => skill::run(cmd),
+        Command::Mcp(cmd) => mcp::run(cmd),
         Command::Quest(cmd) => quest::run(cmd),
         Command::Quests { project, status } => quest::run_list(project, status),
         Command::Assign { quest_id, hero_name } => quest::run_assign(quest_id, hero_name),
+        Command::Secret(cmd) => secret::run(cmd),
+        Command::SetupTelegram => run_setup_telegram(),
         Command::Locks => run_locks(),
         Command::Dashboard => {
             println!("Opening dashboard at http://localhost:7432 ...");
             Ok(())
         }
     }
+}
+
+fn run_setup_telegram() -> Result<()> {
+    use dialoguer::Input;
+    use serde_json::Value;
+    use std::fs;
+
+    println!("{}", "TELEGRAM SETUP".yellow().bold());
+    println!("{}", "-".repeat(40));
+    println!("  You need a Telegram Bot Token and Chat ID.");
+    println!("  1. Talk to @BotFather on Telegram to create a bot");
+    println!("  2. Send a message to your bot, then visit:");
+    println!("     https://api.telegram.org/bot<TOKEN>/getUpdates");
+    println!("     to find your chat_id.\n");
+
+    let token: String = Input::new()
+        .with_prompt("Bot Token")
+        .interact_text()?;
+
+    let chat_id: String = Input::new()
+        .with_prompt("Chat ID")
+        .interact_text()?;
+
+    let notification_level: String = Input::new()
+        .with_prompt("Notification level (1=Silent, 2=Dashboard, 3=Telegram, 4=Urgent)")
+        .default("3".to_string())
+        .interact_text()?;
+
+    // Load or create config.json
+    let config_path = db::guild_dir().join("config.json");
+    let mut config: Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)?;
+        serde_json::from_str(&content).unwrap_or(Value::Object(serde_json::Map::new()))
+    } else {
+        Value::Object(serde_json::Map::new())
+    };
+
+    // Set telegram config
+    let telegram = serde_json::json!({
+        "bot_token": token,
+        "chat_id": chat_id,
+        "notification_level": notification_level.parse::<u32>().unwrap_or(3),
+    });
+
+    config.as_object_mut()
+        .expect("config must be an object")
+        .insert("telegram".to_string(), telegram);
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
+
+    println!(
+        "\n{} Telegram configured! Config saved to {}",
+        "+".green(),
+        config_path.display().to_string().dimmed()
+    );
+    println!(
+        "  Run {} to start the bot.",
+        "python3 agents/telegram_bot.py".cyan()
+    );
+
+    Ok(())
 }
 
 fn run_locks() -> Result<()> {

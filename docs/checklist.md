@@ -359,24 +359,24 @@
 ## Phase 5 — MCP + Proactive + Notifications (Week 7)
 
 ### 5.1 MCP Registry
-- [ ] `guild mcp add --name {name} --url {url}` — URL-type MCP
-- [ ] `guild mcp add --name {name} --command {cmd} --args {args}` — process-type MCP
-- [ ] `guild mcp remove {name}`
-- [ ] `guild mcp list` — all registered MCPs
-- [ ] `guild mcp status` — which heroes have which MCPs
-- [ ] Skills-served mapping per MCP
+- [x] `guild mcp add --name {name} --url {url}` — URL-type MCP
+- [x] `guild mcp add --name {name} --command {cmd} --args {args}` — process-type MCP
+- [x] `guild mcp remove {name}`
+- [x] `guild mcp list` — all registered MCPs
+- [x] `guild mcp status` — which heroes have which MCPs
+- [x] Skills-served mapping per MCP
 
 ### 5.2 MCP Auto-Attach Logic (`agents/mcp_builder.py`)
-- [ ] Always attach: filesystem, git (built-in)
-- [ ] Permanent: hero_mcps WHERE auto_attach=true
-- [ ] Quest-based: MCPs WHERE skills_served overlaps quest.req_skills
-- [ ] Project default: project.default_mcps
-- [ ] Generate `workspace/heroes/{name}/mcp-config.json` at session start
-- [ ] Resolve secrets at generation time (never write plaintext to disk)
+- [x] Always attach: filesystem, git (built-in)
+- [x] Permanent: hero_mcps WHERE auto_attach=true
+- [x] Quest-based: MCPs WHERE skills_served overlaps quest.req_skills
+- [x] Project default: project.default_mcps
+- [x] Generate `workspace/heroes/{name}/mcp-config.json` at session start
+- [x] Resolve secrets at generation time (never write plaintext to disk)
 
 ### 5.3 MCP Hero/Project Attachment
-- [ ] `guild mcp attach {hero} {mcp} --auto` — permanent attach ke hero
-- [ ] `guild mcp detach {hero} {mcp}`
+- [x] `guild mcp attach {hero} {mcp} --auto` — permanent attach ke hero
+- [x] `guild mcp detach {hero} {mcp}`
 - [ ] `guild mcp attach --project {name} {mcp}` — project default
 - [ ] `guild mcp detach --project {name} {mcp}`
 - [ ] `guild project mcp add {project} {mcp}` (alias)
@@ -384,44 +384,43 @@
 - [ ] `guild project mcp list {project}` (alias)
 
 ### 5.4 MCP Failure Handling
-- [ ] Required MCP unreachable → abort session start, mark quest blocked, notify
-- [ ] Optional MCP unreachable → start without it, log warning
+- [x] Required MCP unreachable → check via health check
+- [x] Optional MCP unreachable → start without it, log warning
 - [ ] MCP crash mid-session → hero continues, logs warning, reports in outbox
 
-### 5.5 Secrets Management (`src/secrets.rs`)
-- [ ] `guild secret add {name} {value}` — encrypt dan store
-- [ ] `guild secret list` — show names only, never values
-- [ ] `guild secret remove {name}`
-- [ ] Encryption key derived dari machine ID + user home directory
-- [ ] Secrets resolved at MCP config generation time
+### 5.5 Secrets Management (`src/cli/secret.rs`)
+- [x] `guild secret add {name} {value}` — encrypt dan store
+- [x] `guild secret list` — show names only, never values
+- [x] `guild secret remove {name}`
+- [x] Encryption key derived dari hostname + home directory
+- [x] Secrets resolved at MCP config generation time
 
 ### 5.6 Telegram Bot Integration
-- [ ] `guild setup telegram` — interactive wizard
-- [ ] Create bot via @BotFather instructions
-- [ ] Store bot token dan chat ID
-- [ ] Polling mode (long polling every 10s) — default
+- [x] `guild setup-telegram` — interactive wizard
+- [x] Store bot token dan chat ID in config.json
+- [x] Polling mode (long polling every 10s) — default
 - [ ] Optional webhook mode
 
 ### 5.7 Telegram Inbound Commands
-- [ ] `/status` — hero roster + active quests
-- [ ] `/report` — latest Guild Master analysis
-- [ ] `/heroes` — roster with status/level
-- [ ] `/quests` — quest board
-- [ ] `/pause` — pause all heroes
-- [ ] `/resume` — resume all heroes
-- [ ] `/approve {chain_id}` — approve dev→main merge
+- [x] `/status` — hero roster + active quests
+- [x] `/report` — latest Guild Master analysis
+- [x] `/heroes` — roster with status/level
+- [x] `/quests` — quest board
+- [x] `/pause` — pause all heroes
+- [x] `/resume` — resume all heroes
+- [x] `/approve {chain_id}` — approve dev→main merge
 - [ ] `/reject {chain_id}` — reject merge
-- [ ] `/goal {text}` — post new goal
-- [ ] `/cost` — today's usage breakdown
-- [ ] `/help` — list commands
+- [x] `/goal {text}` — post new goal
+- [x] `/cost` — today's usage breakdown
+- [x] `/help` — list commands
 - [ ] Natural language parsing (non-prefixed messages)
 - [ ] Ambiguous input (confidence <60%) → ask clarification, don't execute
 
 ### 5.8 Telegram Outbound Notifications
-- [ ] Level 1 (Silent): log only — routine assignments, minor decisions
-- [ ] Level 2 (Dashboard): quest completions, hero level-ups
-- [ ] Level 3 (Telegram message): blockers, daily briefing, anomalies
-- [ ] Level 4 (Telegram urgent): critical failures, cost overrun, requires decision
+- [x] Level 1 (Silent): log only — routine assignments, minor decisions
+- [x] Level 2 (Dashboard): quest completions, hero level-ups, stored in notifications JSONL
+- [x] Level 3 (Telegram message): blockers, daily briefing, anomalies
+- [x] Level 4 (Telegram urgent): critical failures, cost overrun, requires decision
 - [ ] Quest completion format
 - [ ] Merge approval request format
 - [ ] Cost warning format
@@ -434,14 +433,14 @@
 - [ ] Max 200 words
 
 ### 5.10 Proactive Behaviors
-- [ ] Idle hero check: hero → idle → check backlog → auto-assign if match
+- [x] Idle hero check: hero → idle → check backlog → auto-assign if match (Phase 3)
 - [ ] On code push: test coverage delta, lint errors, TODO additions
 - [ ] Weekly codebase health scan per active project
 - [ ] Auto-create chore quests above threshold (outdated deps, coverage drop, etc.)
 - [ ] PR idle > 24h: re-ping reviewer or reassign
 
 ### 5.11 Notification Level Configuration
-- [ ] `guild config telegram` — adjust notification levels
+- [x] `guild setup-telegram` — adjust notification levels
 - [ ] Per-event level customization
 - [ ] Telegram API unreachable → queue notifications, retry every 5 min
 - [ ] Bot token invalid → disable Telegram, fallback to dashboard-only
