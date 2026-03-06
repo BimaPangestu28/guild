@@ -133,6 +133,51 @@ class TelegramBot:
             prefix = "\u26a0\ufe0f " if level >= LEVEL_URGENT else ""
             self.send_message(f"{prefix}{message}")
 
+    def notify_quest_complete(self, quest_id, quest_title, hero_name, chain_id=None):
+        """Send a formatted quest completion notification."""
+        msg = "\u2705 *Quest Complete*\n\n"
+        msg += f"Quest: `{quest_id}` \u2014 {quest_title}\n"
+        msg += f"Hero: {hero_name}\n"
+        if chain_id:
+            msg += f"Chain: `{chain_id[:8]}`\n"
+        self.send_message(msg)
+
+    def notify_level_up(self, hero_name, hero_class, new_level):
+        """Send a formatted hero level-up notification."""
+        msg = "\u2b06\ufe0f *Level Up!*\n\n"
+        msg += f"{hero_name} ({hero_class}) reached *Level {new_level}*!"
+        self.send_message(msg)
+
+    def notify_cost_warning(self, current_cost, cap, percentage):
+        """Send a formatted cost warning notification."""
+        emoji = "\U0001f534" if percentage > 90 else "\U0001f7e1"
+        msg = f"{emoji} *Cost Warning*\n\n"
+        msg += f"Today: ${current_cost:.2f} / ${cap:.2f} ({percentage:.0f}%)\n"
+        if percentage >= 100:
+            msg += "\u26a0\ufe0f All heroes paused \u2014 daily cap reached."
+        self.send_message(msg)
+
+    def notify_escalation(self, quest_id, problem, options=None):
+        """Send a formatted escalation notification with optional A/B choices."""
+        msg = "\U0001f6a8 *Escalation Required*\n\n"
+        msg += f"Quest: `{quest_id}`\n"
+        msg += f"Problem: {problem}\n"
+        if options:
+            msg += f"\nOptions:\n"
+            for i, opt in enumerate(options):
+                msg += f"  {chr(65+i)}) {opt}\n"
+            msg += f"\nReply with your choice."
+        self.send_message(msg)
+
+    def notify_merge_ready(self, chain_id, goal, project_name):
+        """Send a formatted merge-ready notification."""
+        msg = "\U0001f500 *Merge Ready*\n\n"
+        msg += f"Chain: `{chain_id[:8]}`\n"
+        msg += f"Project: {project_name}\n"
+        msg += f"Goal: _{goal}_\n\n"
+        msg += f"Use `/approve {chain_id[:8]}` or `/reject {chain_id[:8]}`"
+        self.send_message(msg)
+
     @staticmethod
     def _store_dashboard_notification(level, message):
         """Store notification for the dashboard to pick up."""
@@ -186,22 +231,46 @@ def generate_daily_briefing(conn):
         "SELECT name, status FROM heroes ORDER BY name"
     ).fetchall()
 
+    # Cost today
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cost_row = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0) FROM cost_log WHERE timestamp LIKE ?",
+        (f"{today_str}%",),
+    ).fetchone()
+    daily_cost = cost_row[0] if cost_row else 0.0
+
     # Build briefing
-    lines = ["*Daily Guild Briefing*", ""]
-    lines.append(f"Quests: {active} active, {backlog} backlog, {blocked} blocked, {done_today} done today")
+    status_emoji = {
+        "idle": "\U0001f7e2", "on_quest": "\U0001f535",
+        "offline": "\u26ab", "blocked": "\U0001f534",
+        "paused": "\U0001f7e0",
+    }
+
+    lines = ["\U0001f4dc *Daily Guild Briefing*", ""]
+
+    lines.append("\U0001f5e1 *Quests*")
+    lines.append(f"  \U0001f535 Active: {active} | \u26aa Backlog: {backlog}")
+    lines.append(f"  \U0001f534 Blocked: {blocked} | \u2705 Done today: {done_today}")
     lines.append("")
-    lines.append("Heroes:")
+
+    lines.append("\U0001f9d9 *Heroes*")
     for h in heroes:
-        lines.append(f"  {h['name']}: {h['status']}")
+        emoji = status_emoji.get(h["status"], "\u26aa")
+        lines.append(f"  {emoji} {h['name']}: {h['status']}")
+    if not heroes:
+        lines.append("  No heroes recruited.")
+    lines.append("")
 
     if blocked > 0:
         blocked_quests = conn.execute(
             "SELECT id, title FROM quests WHERE status = 'blocked' LIMIT 3"
         ).fetchall()
-        lines.append("")
-        lines.append("Blocked:")
+        lines.append("\U0001f6a8 *Blocked*")
         for q in blocked_quests:
-            lines.append(f"  [{q['id']}] {q['title']}")
+            lines.append(f"  `{q['id']}` {q['title']}")
+        lines.append("")
+
+    lines.append(f"\U0001f4b0 *Cost today:* ${daily_cost:.2f}")
 
     return "\n".join(lines)
 

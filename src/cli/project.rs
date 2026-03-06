@@ -3,6 +3,7 @@ use chrono::Utc;
 use clap::Subcommand;
 use colored::Colorize;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 use crate::db;
 
@@ -42,6 +43,8 @@ pub enum ProjectCommand {
     Remove { name: String },
     /// Show project health report
     Health { name: String },
+    /// Set up branch protection rules
+    Protect { name: String },
 }
 
 pub fn run(cmd: ProjectCommand) -> Result<()> {
@@ -64,6 +67,7 @@ pub fn run(cmd: ProjectCommand) -> Result<()> {
             println!("Health report for {} — coming soon", name);
             Ok(())
         }
+        ProjectCommand::Protect { name } => run_protect(&name),
     }
 }
 
@@ -147,6 +151,10 @@ fn run_add(
     }
     println!("  Path: {}", project_path.display());
     println!("  Branches: {} → {}", main_b, dev_b);
+    println!(
+        "\n  Tip: Run {} to set up branch protection rules.",
+        format!("guild project protect {}", project_name).cyan()
+    );
 
     Ok(())
 }
@@ -260,6 +268,331 @@ fn run_remove(name: &str) -> Result<()> {
         bail!("Project '{}' not found", name);
     }
     println!("{} Project '{}' removed from guild", "✓".green(), name);
+    Ok(())
+}
+
+fn run_protect(name: &str) -> Result<()> {
+    let conn = db::open()?;
+    let row = conn.query_row(
+        "SELECT path, repo_provider, main_branch, dev_branch FROM projects WHERE name = ?1",
+        [name],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        },
+    );
+
+    let (path, provider, main_branch, dev_branch) = match row {
+        Ok(r) => r,
+        Err(_) => bail!("Project '{}' not found", name),
+    };
+
+    let provider = provider.unwrap_or_else(|| "none".into());
+
+    // Ensure dev branch exists, create from main if not
+    ensure_branch_exists(&path, &dev_branch, &main_branch)?;
+
+    match provider.as_str() {
+        "github" => protect_github(&path, &main_branch, &dev_branch)?,
+        "gitlab" => protect_gitlab(&path, &main_branch, &dev_branch)?,
+        _ => {
+            println!("{}", "Manual branch protection setup required.".yellow());
+            println!("  Configure these rules in your repository settings:");
+            println!("  Branch '{}':", main_branch);
+            println!("    - Require pull request before merging");
+            println!("    - Require at least 1 approval");
+            println!("    - Dismiss stale reviews on new commits");
+            println!("    - Do not allow direct pushes");
+            println!("  Branch '{}':", dev_branch);
+            println!("    - Require pull request before merging");
+            println!("    - Require status checks to pass");
+            println!("    - Do not allow direct pushes");
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_branch_exists(path: &str, branch: &str, base: &str) -> Result<()> {
+    let check = Command::new("git")
+        .args(["-C", path, "rev-parse", "--verify", branch])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    if let Ok(status) = check {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    // Check remote
+    let remote_check = Command::new("git")
+        .args(["-C", path, "ls-remote", "--heads", "origin", branch])
+        .output()?;
+
+    if !String::from_utf8_lossy(&remote_check.stdout).trim().is_empty() {
+        return Ok(());
+    }
+
+    // Branch doesn't exist anywhere, create from base
+    println!(
+        "  Creating branch '{}' from '{}'...",
+        branch.cyan(),
+        base
+    );
+    let status = Command::new("git")
+        .args(["-C", path, "branch", branch, base])
+        .status()?;
+    if !status.success() {
+        println!(
+            "  {} Could not create branch '{}' (non-blocking)",
+            "Warning:".yellow(),
+            branch
+        );
+    } else {
+        // Push the new branch
+        let push = Command::new("git")
+            .args(["-C", path, "push", "-u", "origin", branch])
+            .status();
+        if let Ok(s) = push {
+            if !s.success() {
+                println!(
+                    "  {} Could not push branch '{}' to origin (non-blocking)",
+                    "Warning:".yellow(),
+                    branch
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_github_remote(url: &str) -> Result<(String, String)> {
+    // Match HTTPS: https://github.com/owner/repo.git or https://github.com/owner/repo
+    // Match SSH: git@github.com:owner/repo.git or git@github.com:owner/repo
+    let re = regex::Regex::new(r"[:/]([^/]+)/([^/.]+?)(?:\.git)?$")?;
+    if let Some(caps) = re.captures(url) {
+        Ok((caps[1].to_string(), caps[2].to_string()))
+    } else {
+        bail!("Could not parse owner/repo from remote URL: {}", url)
+    }
+}
+
+fn protect_github(path: &str, main_branch: &str, dev_branch: &str) -> Result<()> {
+    let output = Command::new("git")
+        .args(["-C", path, "remote", "get-url", "origin"])
+        .output()?;
+    if !output.status.success() {
+        bail!("Could not get git remote URL");
+    }
+    let remote_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let (owner, repo) = parse_github_remote(&remote_url)?;
+
+    println!(
+        "Setting up GitHub branch protection for {}/{}...",
+        owner.cyan(),
+        repo.cyan()
+    );
+
+    // Protect main: require PR reviews (1 approval), dismiss stale reviews, no direct push
+    let main_rules = serde_json::json!({
+        "required_pull_request_reviews": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews": true
+        },
+        "enforce_admins": false,
+        "required_status_checks": null,
+        "restrictions": null
+    });
+
+    let mut child = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{}/{}/branches/{}/protection", owner, repo, main_branch),
+            "-X", "PUT",
+            "-H", "Accept: application/vnd.github+json",
+            "--input", "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(path)
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(main_rules.to_string().as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        println!(
+            "  {} Branch '{}' protected (require PR, 1 approval, dismiss stale reviews)",
+            "✓".green(),
+            main_branch
+        );
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        println!(
+            "  {} Failed to protect '{}': {}",
+            "Warning:".yellow(),
+            main_branch,
+            stderr.trim()
+        );
+    }
+
+    // Protect dev: require PR reviews (1 approval), require status checks, no direct push
+    let dev_rules = serde_json::json!({
+        "required_pull_request_reviews": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews": false
+        },
+        "enforce_admins": false,
+        "required_status_checks": {
+            "strict": true,
+            "contexts": []
+        },
+        "restrictions": null
+    });
+
+    let mut child = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{}/{}/branches/{}/protection", owner, repo, dev_branch),
+            "-X", "PUT",
+            "-H", "Accept: application/vnd.github+json",
+            "--input", "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(path)
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(dev_rules.to_string().as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        println!(
+            "  {} Branch '{}' protected (require PR, status checks)",
+            "✓".green(),
+            dev_branch
+        );
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        println!(
+            "  {} Failed to protect '{}': {}",
+            "Warning:".yellow(),
+            dev_branch,
+            stderr.trim()
+        );
+    }
+
+    Ok(())
+}
+
+fn protect_gitlab(path: &str, main_branch: &str, dev_branch: &str) -> Result<()> {
+    let output = Command::new("git")
+        .args(["-C", path, "remote", "get-url", "origin"])
+        .output()?;
+    if !output.status.success() {
+        bail!("Could not get git remote URL");
+    }
+    let remote_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let (owner, repo) = parse_github_remote(&remote_url)?;
+    let project_id = format!("{}/{}", owner, repo);
+    let encoded_project = urlencoding::encode(&project_id);
+
+    println!(
+        "Setting up GitLab branch protection for {}/{}...",
+        owner.cyan(),
+        repo.cyan()
+    );
+
+    // Unprotect first to allow re-running (best-effort)
+    for branch in [main_branch, dev_branch] {
+        let encoded_branch = urlencoding::encode(branch);
+        let _ = Command::new("glab")
+            .args([
+                "api", "-X", "DELETE",
+                &format!("/projects/{}/protected_branches/{}", encoded_project, encoded_branch),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .current_dir(path)
+            .status();
+    }
+
+    // main branch: no direct push, maintainers merge
+    let status = Command::new("glab")
+        .args([
+            "api", "-X", "POST",
+            &format!("/projects/{}/protected_branches", encoded_project),
+            "-f", &format!("name={}", main_branch),
+            "-f", "push_access_level=0",
+            "-f", "merge_access_level=40",
+            "-f", "allow_force_push=false",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(path)
+        .output()?;
+
+    if status.status.success() {
+        println!(
+            "  {} Branch '{}' protected (no push, maintainers merge)",
+            "✓".green(),
+            main_branch
+        );
+    } else {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        println!(
+            "  {} Failed to protect '{}': {}",
+            "Warning:".yellow(),
+            main_branch,
+            stderr.trim()
+        );
+    }
+
+    // dev branch: no direct push, developers merge
+    let status = Command::new("glab")
+        .args([
+            "api", "-X", "POST",
+            &format!("/projects/{}/protected_branches", encoded_project),
+            "-f", &format!("name={}", dev_branch),
+            "-f", "push_access_level=0",
+            "-f", "merge_access_level=30",
+            "-f", "allow_force_push=false",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(path)
+        .output()?;
+
+    if status.status.success() {
+        println!(
+            "  {} Branch '{}' protected (no push, developers merge)",
+            "✓".green(),
+            dev_branch
+        );
+    } else {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        println!(
+            "  {} Failed to protect '{}': {}",
+            "Warning:".yellow(),
+            dev_branch,
+            stderr.trim()
+        );
+    }
+
     Ok(())
 }
 

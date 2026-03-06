@@ -608,7 +608,18 @@ def setup_branch_protection(project_path, provider, main_branch="main", dev_bran
     """Configure branch protection rules via provider API.
 
     Uses get_repo_info to dynamically resolve owner/repo.
-    Returns True on success, False on failure.
+
+    GitHub rules:
+      - main: require PR, 1 approval (human), no direct push, dismiss stale reviews
+      - development: require PR, no direct push, require status checks
+
+    GitLab rules:
+      - main: no direct push (push_access_level=0), maintainers merge (merge_access_level=40)
+      - development: no direct push, developers merge (merge_access_level=30)
+
+    For provider="none": prints manual instructions and returns False.
+
+    Returns True on full success, False on any failure (logs warnings, never blocks).
     """
     owner, repo = get_repo_info(project_path)
     if not owner or not repo:
@@ -616,58 +627,131 @@ def setup_branch_protection(project_path, provider, main_branch="main", dev_bran
         return False
 
     if provider == "github":
+        import json as _json
+        success = True
+
+        # main branch: require PR with 1 approval, dismiss stale reviews, no direct push
+        main_rules = _json.dumps({
+            "required_pull_request_reviews": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews": True,
+            },
+            "enforce_admins": False,
+            "required_status_checks": None,
+            "restrictions": None,
+        })
         try:
-            # main branch: require PR, require approvals, enforce admins
-            result = _run_git(["gh", "api", "-X", "PUT",
-                f"/repos/{owner}/{repo}/branches/{main_branch}/protection",
-                "-f", "required_pull_request_reviews[required_approving_review_count]=1",
-                "-f", "enforce_admins=true",
-                "-f", "required_status_checks=null",
-                "-f", "restrictions=null"], cwd=project_path)
-            if result is None or result.returncode != 0:
-                stderr = result.stderr if result else "unknown error"
-                logger.warning("Failed to protect branch %s: %s", main_branch, stderr)
-                return False
-
-            # dev branch: require PR, but don't enforce admins
-            result = _run_git(["gh", "api", "-X", "PUT",
-                f"/repos/{owner}/{repo}/branches/{dev_branch}/protection",
-                "-f", "required_pull_request_reviews[required_approving_review_count]=1",
-                "-f", "enforce_admins=false",
-                "-f", "required_status_checks=null",
-                "-f", "restrictions=null"], cwd=project_path)
-            if result is None or result.returncode != 0:
-                stderr = result.stderr if result else "unknown error"
-                logger.warning("Failed to protect branch %s: %s", dev_branch, stderr)
-                return False
-
-            logger.info("Branch protection configured for %s/%s (github)", owner, repo)
-            return True
-
+            proc = subprocess.run(
+                ["gh", "api", "-X", "PUT",
+                 f"/repos/{owner}/{repo}/branches/{main_branch}/protection",
+                 "-H", "Accept: application/vnd.github+json",
+                 "--input", "-"],
+                input=main_rules, capture_output=True, text=True, cwd=project_path,
+            )
+            if proc.returncode != 0:
+                logger.warning("Failed to protect branch %s: %s", main_branch, proc.stderr)
+                success = False
+            else:
+                logger.info("Protected %s (require PR, 1 approval, dismiss stale reviews)", main_branch)
         except Exception as exc:
-            logger.warning("Branch protection setup failed: %s", exc)
-            return False
+            logger.warning("Branch protection for %s failed: %s", main_branch, exc)
+            success = False
+
+        # dev branch: require PR with 1 approval, require status checks, no direct push
+        dev_rules = _json.dumps({
+            "required_pull_request_reviews": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews": False,
+            },
+            "enforce_admins": False,
+            "required_status_checks": {
+                "strict": True,
+                "contexts": [],
+            },
+            "restrictions": None,
+        })
+        try:
+            proc = subprocess.run(
+                ["gh", "api", "-X", "PUT",
+                 f"/repos/{owner}/{repo}/branches/{dev_branch}/protection",
+                 "-H", "Accept: application/vnd.github+json",
+                 "--input", "-"],
+                input=dev_rules, capture_output=True, text=True, cwd=project_path,
+            )
+            if proc.returncode != 0:
+                logger.warning("Failed to protect branch %s: %s", dev_branch, proc.stderr)
+                success = False
+            else:
+                logger.info("Protected %s (require PR, status checks)", dev_branch)
+        except Exception as exc:
+            logger.warning("Branch protection for %s failed: %s", dev_branch, exc)
+            success = False
+
+        if success:
+            logger.info("Branch protection configured for %s/%s (github)", owner, repo)
+        return success
 
     elif provider == "gitlab":
+        success = True
         try:
-            # URL-encode owner/repo for GitLab project ID
             project_id = urllib.parse.quote(f"{owner}/{repo}", safe="")
+
+            # Unprotect first to allow re-running (best-effort, ignore errors)
+            for branch in [main_branch, dev_branch]:
+                encoded_branch = urllib.parse.quote(branch, safe="")
+                _run_git(["glab", "api", "-X", "DELETE",
+                          f"/projects/{project_id}/protected_branches/{encoded_branch}"],
+                         cwd=project_path)
+
+            # main branch: no direct push, maintainers merge
             result = _run_git(["glab", "api", "-X", "POST",
                 f"/projects/{project_id}/protected_branches",
                 "-f", f"name={main_branch}",
                 "-f", "push_access_level=0",
-                "-f", "merge_access_level=40"], cwd=project_path)
+                "-f", "merge_access_level=40",
+                "-f", "allow_force_push=false"], cwd=project_path)
             if result is None or result.returncode != 0:
                 stderr = result.stderr if result else "unknown error"
                 logger.warning("Failed to protect branch %s on GitLab: %s", main_branch, stderr)
-                return False
+                success = False
+            else:
+                logger.info("Protected %s on GitLab (no push, maintainers merge)", main_branch)
 
-            logger.info("Branch protection configured for %s/%s (gitlab)", owner, repo)
-            return True
+            # dev branch: no direct push, developers merge
+            result = _run_git(["glab", "api", "-X", "POST",
+                f"/projects/{project_id}/protected_branches",
+                "-f", f"name={dev_branch}",
+                "-f", "push_access_level=0",
+                "-f", "merge_access_level=30",
+                "-f", "allow_force_push=false"], cwd=project_path)
+            if result is None or result.returncode != 0:
+                stderr = result.stderr if result else "unknown error"
+                logger.warning("Failed to protect branch %s on GitLab: %s", dev_branch, stderr)
+                success = False
+            else:
+                logger.info("Protected %s on GitLab (no push, developers merge)", dev_branch)
+
+            if success:
+                logger.info("Branch protection configured for %s/%s (gitlab)", owner, repo)
+            return success
 
         except Exception as exc:
             logger.warning("GitLab branch protection setup failed: %s", exc)
             return False
+
+    elif provider == "none":
+        print("Manual branch protection setup required.")
+        print(f"  Please configure the following in your repository settings:")
+        print(f"  Branch '{main_branch}':")
+        print(f"    - Require pull request before merging")
+        print(f"    - Require at least 1 approval")
+        print(f"    - Dismiss stale reviews on new commits")
+        print(f"    - Do not allow direct pushes")
+        print(f"  Branch '{dev_branch}':")
+        print(f"    - Require pull request before merging")
+        print(f"    - Require status checks to pass")
+        print(f"    - Do not allow direct pushes")
+        return False
 
     else:
         logger.warning("Branch protection not supported for provider: %s", provider)

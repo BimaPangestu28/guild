@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -397,6 +398,16 @@ def process_actions(conn, response_data):
         for e in response_data["escalations"]:
             report += f"- {e}\n"
         report += "\n"
+
+        # Send each escalation via Telegram
+        try:
+            _tg_bot = _load_telegram_bot()
+            if _tg_bot:
+                for e in response_data["escalations"]:
+                    _tg_bot.notify_escalation("guild-master", e)
+        except Exception:
+            pass
+
     report += f"## Next\n{response_data.get('next', 'Monitoring...')}\n"
 
     gm_outbox = OUTBOX / "guild-master.md"
@@ -443,6 +454,26 @@ def process_hero_report(conn, hero_name, content):
 
         log_activity(conn, hero_name, f"Quest {quest_id} completed (+{xp} XP)", quest_id=quest_id)
         print(f"  ✓ {hero_name}: quest {quest_id} completed (+{xp} XP)")
+
+        # Send formatted Telegram notifications for quest completion and level-up
+        try:
+            _tg_bot = _load_telegram_bot()
+            if _tg_bot:
+                _q_row = conn.execute(
+                    "SELECT title, chain_id FROM quests WHERE id = ?", (quest_id,)
+                ).fetchone()
+                _q_title = _q_row["title"] if _q_row else quest_id
+                _q_chain = _q_row["chain_id"] if _q_row else None
+                _tg_bot.notify_quest_complete(quest_id, _q_title, hero_name, chain_id=_q_chain)
+
+                if hero and new_level > hero["level"]:
+                    _h_detail = conn.execute(
+                        "SELECT class FROM heroes WHERE name = ?", (hero_name,)
+                    ).fetchone()
+                    _h_class = _h_detail["class"] if _h_detail else "Unknown"
+                    _tg_bot.notify_level_up(hero_name, _h_class, new_level)
+        except Exception:
+            pass
 
         # Resolve project name for memory operations
         quest_detail = conn.execute("SELECT project_id FROM quests WHERE id = ?", (quest_id,)).fetchone()
@@ -556,6 +587,17 @@ def get_cost_cap():
 def check_cost_cap():
     daily_cost = get_daily_cost()
     cap = get_cost_cap()
+    percentage = (daily_cost / cap * 100) if cap > 0 else 0
+
+    # Send warning at 80% threshold even if not exceeded
+    if percentage >= 80:
+        try:
+            _tg_bot = _load_telegram_bot()
+            if _tg_bot:
+                _tg_bot.notify_cost_warning(daily_cost, cap, percentage)
+        except Exception:
+            pass
+
     if daily_cost >= cap:
         print(f"  !! COST CAP EXCEEDED: ${daily_cost:.2f} >= ${cap:.2f}")
         conn = get_db()
@@ -775,6 +817,16 @@ def _create_fix_quest(conn, review_quest):
         )
         existing = gm_outbox.read_text() if gm_outbox.exists() else ""
         gm_outbox.write_text(existing + escalation_msg)
+
+        # Send formatted Telegram escalation for review cycle limit
+        try:
+            _tg_bot = _load_telegram_bot()
+            if _tg_bot:
+                _problem = f"Chain {chain_id[:8]} exceeded {review_cycles} review cycles (max {MAX_REVIEW_CYCLES})"
+                _tg_bot.notify_escalation(chain_id[:8], _problem, options=["Merge as-is", "Abandon chain"])
+        except Exception:
+            pass
+
         conn.commit()
         return
 
@@ -874,12 +926,14 @@ def check_merge_ready(conn, chain_id):
     try:
         bot = _load_telegram_bot()
         if bot:
-            bot.send_message(
-                f"*Merge Ready*\n\n"
-                f"Chain `{chain_id[:8]}` is complete and ready for dev->main merge.\n"
-                f"Goal: _{chain['goal']}_\n\n"
-                f"Use `/approve {chain_id[:8]}` to create PR or `/reject {chain_id[:8]}` to keep on dev."
-            )
+            project_name = "unknown"
+            if chain["project_id"]:
+                _proj = conn.execute(
+                    "SELECT name FROM projects WHERE id = ?", (chain["project_id"],)
+                ).fetchone()
+                if _proj:
+                    project_name = _proj["name"]
+            bot.notify_merge_ready(chain_id, chain["goal"], project_name)
     except Exception:
         pass
 
@@ -1038,7 +1092,35 @@ def _handle_blocked_quests(conn, client):
             existing = gm_outbox.read_text() if gm_outbox.exists() else ""
             gm_outbox.write_text(existing + escalation_msg)
 
+            # Send formatted Telegram escalation
+            try:
+                _tg_bot = _load_telegram_bot()
+                if _tg_bot:
+                    _problem = f"Blocked {block_count} times. Hero: {quest['hero_name'] or 'unassigned'}. Title: {quest['title']}"
+                    _tg_bot.notify_escalation(quest["id"], _problem)
+            except Exception:
+                pass
+
     conn.commit()
+
+
+CYCLE_TIMEOUT = 600  # 10 minutes
+
+
+def _handle_stuck_cycle():
+    """Called when a cycle exceeds the timeout."""
+    handle_error(GuildError.CRITICAL, "Guild Master cycle stuck > 10 minutes, forcing restart")
+    # Force the process to restart by raising in main thread
+    import _thread
+    _thread.interrupt_main()
+
+
+def _cycle_watchdog(timeout=CYCLE_TIMEOUT):
+    """Kill the current cycle if it takes too long."""
+    timer = threading.Timer(timeout, _handle_stuck_cycle)
+    timer.daemon = True
+    timer.start()
+    return timer
 
 
 def run_cycle(client):
@@ -1128,20 +1210,28 @@ def main():
 
     try:
         while True:
+            timer = _cycle_watchdog(CYCLE_TIMEOUT)
             try:
                 run_cycle(client)
+                timer.cancel()
                 crash_times.clear()
             except sqlite3.DatabaseError as e:
+                timer.cancel()
                 error_msg = str(e)
                 if "malformed" in error_msg or "corrupt" in error_msg or "disk" in error_msg:
                     _handle_db_corruption(error_msg)
                 else:
                     handle_error(GuildError.WARNING, f"Database error in cycle: {e}")
             except SystemExit:
+                timer.cancel()
                 raise
             except KeyboardInterrupt:
-                raise
+                timer.cancel()
+                # Check if this was from watchdog
+                handle_error(GuildError.WARNING, "Cycle interrupted (possible stuck detection)")
+                continue
             except Exception as e:
+                timer.cancel()
                 now = time.time()
                 crash_times.append(now)
                 crash_times = [t for t in crash_times if now - t <= CRASH_WINDOW_SECONDS]
