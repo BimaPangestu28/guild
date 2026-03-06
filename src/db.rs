@@ -389,6 +389,128 @@ pub fn get_cost_by_project(conn: &Connection, date: &str) -> Result<Vec<(String,
     rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
 }
 
+// --- Hero CRUD ---
+
+pub fn get_hero_by_name(conn: &Connection, name: &str) -> Result<Option<(String, String, String, String, i64, i64, Option<String>)>> {
+    let mut stmt = conn.prepare("SELECT id, name, class, status, level, xp, current_quest_id FROM heroes WHERE name = ?1")?;
+    let result = stmt.query_row([name], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, Option<String>>(6)?,
+        ))
+    });
+    match result {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn update_hero_status(conn: &Connection, name: &str, status: &str) -> Result<()> {
+    conn.execute("UPDATE heroes SET status = ?1 WHERE name = ?2", rusqlite::params![status, name])?;
+    Ok(())
+}
+
+pub fn delete_hero(conn: &Connection, name: &str) -> Result<()> {
+    let hero_id: Option<String> = conn
+        .query_row("SELECT id FROM heroes WHERE name = ?1", [name], |row| row.get(0))
+        .ok();
+    if let Some(id) = hero_id {
+        conn.execute("DELETE FROM hero_skills WHERE hero_id = ?1", [&id])?;
+        conn.execute("DELETE FROM heroes WHERE id = ?1", [&id])?;
+    }
+    Ok(())
+}
+
+// --- Quest CRUD ---
+
+pub fn get_quest(conn: &Connection, id: &str) -> Result<Option<(String, String, String, String, String, Option<String>)>> {
+    let mut stmt = conn.prepare("SELECT id, title, status, type, tier, assigned_to FROM quests WHERE id = ?1")?;
+    let result = stmt.query_row([id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+        ))
+    });
+    match result {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn update_quest_status(conn: &Connection, id: &str, status: &str) -> Result<()> {
+    conn.execute("UPDATE quests SET status = ?1 WHERE id = ?2", rusqlite::params![status, id])?;
+    if status == "done" {
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute("UPDATE quests SET completed_at = ?1 WHERE id = ?2", rusqlite::params![now, id])?;
+    }
+    Ok(())
+}
+
+pub fn list_quests_by_status(conn: &Connection, status: &str) -> Result<Vec<(String, String, String, Option<String>)>> {
+    let mut stmt = conn.prepare("SELECT id, title, tier, assigned_to FROM quests WHERE status = ?1 ORDER BY created_at")?;
+    let rows = stmt.query_map([status], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
+// --- Project CRUD ---
+
+pub fn get_project_by_name(conn: &Connection, name: &str) -> Result<Option<(String, String, String, String, String, String)>> {
+    let mut stmt = conn.prepare("SELECT id, name, path, repo_provider, main_branch, dev_branch FROM projects WHERE name = ?1")?;
+    let result = stmt.query_row([name], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+        ))
+    });
+    match result {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn update_project_status(conn: &Connection, name: &str, status: &str) -> Result<()> {
+    conn.execute("UPDATE projects SET status = ?1 WHERE name = ?2", rusqlite::params![status, name])?;
+    Ok(())
+}
+
+// --- Activity Log ---
+
+pub fn get_recent_activity(conn: &Connection, limit: usize) -> Result<Vec<(String, String, String, String)>> {
+    let mut stmt = conn.prepare("SELECT timestamp, actor, action, level FROM activity_log ORDER BY timestamp DESC LIMIT ?1")?;
+    let rows = stmt.query_map([limit], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
 pub fn get_cost_daily_cap(conn: &Connection) -> f64 {
     get_config(conn, "cost-cap-daily")
         .ok()
@@ -486,5 +608,202 @@ mod tests {
         let locks = get_locks(&conn).unwrap();
         assert_eq!(locks.len(), 1);
         assert_eq!(locks[0].0, "file1.rs");
+    }
+
+    fn insert_test_hero(conn: &Connection, id: &str, name: &str) {
+        conn.execute(
+            "INSERT INTO heroes (id, name, class, status, level, xp, last_active) VALUES (?1, ?2, 'Rust Sorcerer', 'idle', 1, 0, '2024-01-01')",
+            rusqlite::params![id, name],
+        ).unwrap();
+    }
+
+    fn insert_test_project(conn: &Connection, id: &str, name: &str) {
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO projects (id, name, display_name, path, repo_provider, main_branch, dev_branch, status, created_at) VALUES (?1, ?2, ?2, '/tmp/test', 'none', 'main', 'development', 'active', ?3)",
+            rusqlite::params![id, name, now],
+        ).unwrap();
+    }
+
+    #[test]
+    fn test_get_hero_by_name() {
+        let conn = test_db();
+        insert_test_hero(&conn, "h1", "Aria");
+
+        let hero = get_hero_by_name(&conn, "Aria").unwrap();
+        assert!(hero.is_some());
+        let (id, name, class, status, level, xp, quest) = hero.unwrap();
+        assert_eq!(id, "h1");
+        assert_eq!(name, "Aria");
+        assert_eq!(class, "Rust Sorcerer");
+        assert_eq!(status, "idle");
+        assert_eq!(level, 1);
+        assert_eq!(xp, 0);
+        assert!(quest.is_none());
+
+        let missing = get_hero_by_name(&conn, "NonExistent").unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_update_hero_status() {
+        let conn = test_db();
+        insert_test_hero(&conn, "h1", "Aria");
+
+        update_hero_status(&conn, "Aria", "active").unwrap();
+
+        let hero = get_hero_by_name(&conn, "Aria").unwrap().unwrap();
+        assert_eq!(hero.3, "active");
+    }
+
+    #[test]
+    fn test_delete_hero() {
+        let conn = test_db();
+        insert_test_hero(&conn, "h1", "Aria");
+        conn.execute(
+            "INSERT INTO hero_skills (id, hero_id, name, type, proficiency, created_at, updated_at) VALUES ('s1', 'h1', 'rust', 'language', 3, '2024-01-01', '2024-01-01')",
+            [],
+        ).unwrap();
+
+        delete_hero(&conn, "Aria").unwrap();
+
+        let hero = get_hero_by_name(&conn, "Aria").unwrap();
+        assert!(hero.is_none());
+
+        let skill_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM hero_skills WHERE hero_id = 'h1'", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(skill_count, 0);
+    }
+
+    #[test]
+    fn test_get_quest() {
+        let conn = test_db();
+        insert_test_project(&conn, "p1", "testproj");
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO quest_chains (id, goal, project_id, status, created_at) VALUES ('c1', 'test goal', 'p1', 'active', ?1)",
+            [&now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO quests (id, chain_id, title, description, tier, type, status, project_id, branch, created_at) VALUES ('q1', 'c1', 'Test Quest', 'desc', 'normal', 'implement', 'backlog', 'p1', 'feature/test', ?1)",
+            [&now],
+        ).unwrap();
+
+        let quest = get_quest(&conn, "q1").unwrap();
+        assert!(quest.is_some());
+        let (id, title, status, qtype, tier, assigned) = quest.unwrap();
+        assert_eq!(id, "q1");
+        assert_eq!(title, "Test Quest");
+        assert_eq!(status, "backlog");
+        assert_eq!(qtype, "implement");
+        assert_eq!(tier, "normal");
+        assert!(assigned.is_none());
+
+        let missing = get_quest(&conn, "nonexistent").unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_update_quest_status() {
+        let conn = test_db();
+        insert_test_project(&conn, "p1", "testproj");
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO quest_chains (id, goal, project_id, status, created_at) VALUES ('c1', 'test goal', 'p1', 'active', ?1)",
+            [&now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO quests (id, chain_id, title, description, tier, type, status, project_id, branch, created_at) VALUES ('q1', 'c1', 'Test Quest', 'desc', 'normal', 'implement', 'backlog', 'p1', 'feature/test', ?1)",
+            [&now],
+        ).unwrap();
+
+        update_quest_status(&conn, "q1", "in_progress").unwrap();
+        let quest = get_quest(&conn, "q1").unwrap().unwrap();
+        assert_eq!(quest.2, "in_progress");
+
+        update_quest_status(&conn, "q1", "done").unwrap();
+        let quest = get_quest(&conn, "q1").unwrap().unwrap();
+        assert_eq!(quest.2, "done");
+
+        let completed: Option<String> = conn.query_row(
+            "SELECT completed_at FROM quests WHERE id = 'q1'", [], |r| r.get(0)
+        ).unwrap();
+        assert!(completed.is_some());
+    }
+
+    #[test]
+    fn test_list_quests_by_status() {
+        let conn = test_db();
+        insert_test_project(&conn, "p1", "testproj");
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO quest_chains (id, goal, project_id, status, created_at) VALUES ('c1', 'test goal', 'p1', 'active', ?1)",
+            [&now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO quests (id, chain_id, title, description, tier, type, status, project_id, branch, created_at) VALUES ('q1', 'c1', 'Quest A', 'desc', 'normal', 'implement', 'backlog', 'p1', 'feature/a', ?1)",
+            [&now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO quests (id, chain_id, title, description, tier, type, status, project_id, branch, created_at) VALUES ('q2', 'c1', 'Quest B', 'desc', 'epic', 'implement', 'in_progress', 'p1', 'feature/b', ?1)",
+            [&now],
+        ).unwrap();
+
+        let backlog = list_quests_by_status(&conn, "backlog").unwrap();
+        assert_eq!(backlog.len(), 1);
+        assert_eq!(backlog[0].1, "Quest A");
+
+        let in_progress = list_quests_by_status(&conn, "in_progress").unwrap();
+        assert_eq!(in_progress.len(), 1);
+        assert_eq!(in_progress[0].1, "Quest B");
+    }
+
+    #[test]
+    fn test_get_project_by_name() {
+        let conn = test_db();
+        insert_test_project(&conn, "p1", "myproject");
+
+        let proj = get_project_by_name(&conn, "myproject").unwrap();
+        assert!(proj.is_some());
+        let (id, name, path, provider, main_b, dev_b) = proj.unwrap();
+        assert_eq!(id, "p1");
+        assert_eq!(name, "myproject");
+        assert_eq!(path, "/tmp/test");
+        assert_eq!(provider, "none");
+        assert_eq!(main_b, "main");
+        assert_eq!(dev_b, "development");
+
+        let missing = get_project_by_name(&conn, "nope").unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_update_project_status() {
+        let conn = test_db();
+        insert_test_project(&conn, "p1", "myproject");
+
+        update_project_status(&conn, "myproject", "paused").unwrap();
+
+        let status: String = conn.query_row(
+            "SELECT status FROM projects WHERE name = 'myproject'", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(status, "paused");
+    }
+
+    #[test]
+    fn test_get_recent_activity() {
+        let conn = test_db();
+        log_activity(&conn, "hero1", "started quest", None, None, "info").unwrap();
+        log_activity(&conn, "hero2", "completed quest", None, None, "info").unwrap();
+        log_activity(&conn, "system", "warning", None, None, "warn").unwrap();
+
+        let recent = get_recent_activity(&conn, 2).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].1, "system");
+        assert_eq!(recent[1].1, "hero2");
+
+        let all = get_recent_activity(&conn, 10).unwrap();
+        assert_eq!(all.len(), 3);
     }
 }

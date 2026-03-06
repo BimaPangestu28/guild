@@ -324,6 +324,58 @@ class TelegramBot:
         msg += f"Use `/approve {chain_id[:8]}` or `/reject {chain_id[:8]}`"
         self.send_message(msg)
 
+    def _try_natural_language(self, text):
+        """Try to parse natural language input into a command."""
+        text_lower = text.lower().strip()
+
+        # Simple keyword matching
+        patterns = [
+            # Status queries
+            (["how are", "what's happening", "what is happening", "status", "update"], "status"),
+            (["who is", "heroes", "agents", "who's working", "roster"], "heroes"),
+            (["quest", "tasks", "what's being done", "active work"], "quests"),
+            (["how much", "cost", "spending", "budget", "money"], "cost"),
+            (["report", "summary", "briefing"], "report"),
+            # Actions
+            (["stop", "pause", "halt", "break"], "pause"),
+            (["start", "resume", "continue", "go"], "resume"),
+            (["help", "what can you do", "commands"], "help"),
+        ]
+
+        for keywords, command in patterns:
+            for kw in keywords:
+                if kw in text_lower:
+                    return command
+
+        # Goal detection: starts with action verbs
+        goal_starters = [
+            "add", "create", "build", "implement", "fix", "update",
+            "refactor", "write", "make", "setup", "set up", "configure",
+        ]
+        for starter in goal_starters:
+            if text_lower.startswith(starter):
+                return f"goal:{text}"
+
+        return None  # Couldn't parse
+
+    def _confidence_check(self, text, parsed_command):
+        """Return confidence score 0-100 for the parsed command."""
+        if parsed_command is None:
+            return 0
+
+        text_lower = text.lower()
+
+        # Direct keyword match = high confidence
+        if parsed_command in text_lower:
+            return 90
+
+        # Goal with action verb = medium confidence
+        if parsed_command.startswith("goal:"):
+            return 70
+
+        # Pattern match = medium confidence
+        return 60
+
     @staticmethod
     def _store_dashboard_notification(level, message):
         """Store notification for the dashboard to pick up."""
@@ -793,34 +845,76 @@ COMMANDS = {
 def handle_message(bot, message):
     """Parse and route a Telegram message to the appropriate handler."""
     text = message.get("text", "").strip()
-    if not text.startswith("/"):
+    if not text:
         return
 
     bot._add_to_context("user", text)
 
-    # Split command and arguments
-    parts = text.split(None, 1)
-    command = parts[0].lower()
-    args = parts[1] if len(parts) > 1 else ""
+    if text.startswith("/"):
+        # Split command and arguments
+        parts = text.split(None, 1)
+        command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
 
-    # Strip @botname suffix if present (e.g., /status@MyGuildBot)
-    if "@" in command:
-        command = command.split("@")[0]
+        # Strip @botname suffix if present (e.g., /status@MyGuildBot)
+        if "@" in command:
+            command = command.split("@")[0]
 
-    handler = COMMANDS.get(command)
-    if handler:
-        try:
-            handler(bot, args)
-            bot._add_to_context("bot", f"Handled {command}")
-        except Exception as e:
-            reply = f"Error handling `{command}`: {e}"
+        handler = COMMANDS.get(command)
+        if handler:
+            try:
+                handler(bot, args)
+                bot._add_to_context("bot", f"Handled {command}")
+            except Exception as e:
+                reply = f"Error handling `{command}`: {e}"
+                bot.send_message(reply)
+                bot._add_to_context("bot", reply)
+                print(f"  ! Error handling {command}: {e}")
+        else:
+            reply = f"Unknown command: `{command}`\nUse /help for available commands."
             bot.send_message(reply)
             bot._add_to_context("bot", reply)
-            print(f"  ! Error handling {command}: {e}")
     else:
-        reply = f"Unknown command: `{command}`\nUse /help for available commands."
-        bot.send_message(reply)
-        bot._add_to_context("bot", reply)
+        # Try natural language parsing
+        parsed = bot._try_natural_language(text)
+        confidence = bot._confidence_check(text, parsed)
+
+        if confidence >= 60:
+            if parsed.startswith("goal:"):
+                cmd_goal(bot, parsed[5:])
+                reply = f"Handled natural language goal"
+            else:
+                # Route to existing command handlers
+                nl_commands = {
+                    "status": lambda b: cmd_status(b),
+                    "heroes": lambda b: cmd_heroes(b),
+                    "quests": lambda b: cmd_quests(b),
+                    "cost": lambda b: cmd_cost(b),
+                    "report": lambda b: cmd_report(b),
+                    "pause": lambda b: cmd_pause(b),
+                    "resume": lambda b: cmd_resume(b),
+                    "help": lambda b: cmd_help(b),
+                }
+                handler = nl_commands.get(parsed)
+                if handler:
+                    try:
+                        handler(bot)
+                        reply = f"Handled natural language as /{parsed}"
+                    except Exception as e:
+                        reply = f"Error handling `{parsed}`: {e}"
+                        bot.send_message(reply)
+                else:
+                    reply = "I understood that as a command but couldn't process it."
+                    bot.send_message(reply)
+            bot._add_to_context("bot", reply)
+        else:
+            reply = (
+                "I'm not sure what you mean. Try:\n"
+                "/help - see available commands\n"
+                "Or describe what you want (e.g., 'add user authentication to my-project')"
+            )
+            bot.send_message(reply)
+            bot._add_to_context("bot", reply)
 
 
 # ---------------------------------------------------------------------------

@@ -233,6 +233,21 @@ pub(crate) fn run_add(
         &guild_dir,
     );
 
+    let todos = scan_todos(&project_path.to_string_lossy())?;
+    if !todos.is_empty() {
+        println!("  {} Found {} TODO/FIXME items", "\u{2192}".cyan(), todos.len());
+        if todos.len() <= 10 {
+            for todo in &todos {
+                println!("    {}", todo.dimmed());
+            }
+        } else {
+            for todo in todos.iter().take(5) {
+                println!("    {}", todo.dimmed());
+            }
+            println!("    {} ...and {} more", "".dimmed(), todos.len() - 5);
+        }
+    }
+
     println!(
         "\n  Tip: Run {} to set up branch protection rules.",
         format!("guild project protect {}", project_name).cyan()
@@ -438,6 +453,47 @@ fn scan_conventions(path: &str, project_name: &str, guild_dir: &std::path::Path)
     }
 
     Ok(())
+}
+
+fn scan_todos(path: &str) -> Result<Vec<String>> {
+    let mut todos = Vec::new();
+    let extensions = ["rs", "py", "ts", "tsx", "js", "jsx", "go", "java"];
+    let skip_dirs = ["target", "node_modules", ".git", "__pycache__", "dist", "build", ".next", "vendor"];
+
+    fn walk(dir: &std::path::Path, todos: &mut Vec<String>, extensions: &[&str], skip_dirs: &[&str], root: &std::path::Path) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    if !skip_dirs.contains(&name.as_ref()) {
+                        walk(&path, todos, extensions, skip_dirs, root);
+                    }
+                } else if let Some(ext) = path.extension() {
+                    if extensions.contains(&ext.to_string_lossy().as_ref()) {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            for (i, line) in content.lines().enumerate() {
+                                if line.contains("TODO") || line.contains("FIXME") {
+                                    let trimmed = line.trim();
+                                    if trimmed.len() > 10 {
+                                        todos.push(format!("{}:{}: {}",
+                                            path.strip_prefix(root).unwrap_or(&path).display(),
+                                            i + 1,
+                                            &trimmed[..trimmed.len().min(100)]
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let root = std::path::Path::new(path);
+    walk(root, &mut todos, &extensions, &skip_dirs, root);
+    Ok(todos)
 }
 
 fn run_list() -> Result<()> {
