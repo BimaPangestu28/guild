@@ -33,20 +33,30 @@ pub enum McpCommand {
     List,
     /// Show MCP status (which heroes have which MCPs)
     Status,
-    /// Attach MCP to a hero
+    /// Attach MCP to a hero or project
     Attach {
-        /// Hero name
-        hero: String,
+        /// Hero name (omit if using --project)
+        #[arg(required_unless_present = "project")]
+        hero: Option<String>,
         /// MCP name
         mcp: String,
-        /// Auto-attach on every session
+        /// Auto-attach on every session (hero-level only)
         #[arg(long)]
         auto: bool,
+        /// Attach as project default instead of hero-level
+        #[arg(long)]
+        project: Option<String>,
     },
-    /// Detach MCP from a hero
+    /// Detach MCP from a hero or project
     Detach {
-        hero: String,
+        /// Hero name (omit if using --project)
+        #[arg(required_unless_present = "project")]
+        hero: Option<String>,
+        /// MCP name
         mcp: String,
+        /// Detach from project defaults instead of hero-level
+        #[arg(long)]
+        project: Option<String>,
     },
 }
 
@@ -58,8 +68,20 @@ pub fn run(cmd: McpCommand) -> Result<()> {
         McpCommand::Remove { name } => run_remove(name),
         McpCommand::List => run_list(),
         McpCommand::Status => run_status(),
-        McpCommand::Attach { hero, mcp, auto } => run_attach(hero, mcp, auto),
-        McpCommand::Detach { hero, mcp } => run_detach(hero, mcp),
+        McpCommand::Attach { hero, mcp, auto, project } => {
+            if let Some(project_name) = project {
+                run_attach_project(&project_name, &mcp)
+            } else {
+                run_attach(hero.unwrap(), mcp, auto)
+            }
+        }
+        McpCommand::Detach { hero, mcp, project } => {
+            if let Some(project_name) = project {
+                run_detach_project(&project_name, &mcp)
+            } else {
+                run_detach(hero.unwrap(), mcp)
+            }
+        }
     }
 }
 
@@ -412,5 +434,105 @@ fn run_detach(hero: String, mcp: String) -> Result<()> {
         hero_name.cyan()
     );
 
+    Ok(())
+}
+
+fn run_attach_project(project_name: &str, mcp_name: &str) -> Result<()> {
+    let conn = db::open()?;
+
+    let mcp_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM mcp_servers WHERE name = ?1",
+            [mcp_name],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !mcp_exists {
+        bail!(
+            "MCP '{}' not found. Use `guild mcp list` to see available MCPs.",
+            mcp_name
+        );
+    }
+
+    let current: String = conn
+        .query_row(
+            "SELECT COALESCE(default_mcps, '') FROM projects WHERE name = ?1",
+            [project_name],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("Project '{}' not found", project_name))?;
+
+    let mut mcps: Vec<String> = if current.is_empty() {
+        vec![]
+    } else {
+        current.split(',').map(|s| s.trim().to_string()).collect()
+    };
+
+    if !mcps.contains(&mcp_name.to_string()) {
+        mcps.push(mcp_name.to_string());
+    }
+
+    conn.execute(
+        "UPDATE projects SET default_mcps = ?1 WHERE name = ?2",
+        rusqlite::params![mcps.join(","), project_name],
+    )?;
+
+    db::log_activity(
+        &conn,
+        "system",
+        &format!("MCP '{}' attached to project '{}'", mcp_name, project_name),
+        None,
+        None,
+        "info",
+    )?;
+
+    println!(
+        "{} MCP '{}' attached to project '{}'",
+        "✓".green(),
+        mcp_name.cyan(),
+        project_name.bold()
+    );
+    Ok(())
+}
+
+fn run_detach_project(project_name: &str, mcp_name: &str) -> Result<()> {
+    let conn = db::open()?;
+
+    let current: String = conn
+        .query_row(
+            "SELECT COALESCE(default_mcps, '') FROM projects WHERE name = ?1",
+            [project_name],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("Project '{}' not found", project_name))?;
+
+    let mcps: Vec<String> = current
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s != mcp_name)
+        .collect();
+
+    conn.execute(
+        "UPDATE projects SET default_mcps = ?1 WHERE name = ?2",
+        rusqlite::params![mcps.join(","), project_name],
+    )?;
+
+    db::log_activity(
+        &conn,
+        "system",
+        &format!("MCP '{}' detached from project '{}'", mcp_name, project_name),
+        None,
+        None,
+        "info",
+    )?;
+
+    println!(
+        "{} MCP '{}' detached from project '{}'",
+        "✓".green(),
+        mcp_name.cyan(),
+        project_name.bold()
+    );
     Ok(())
 }

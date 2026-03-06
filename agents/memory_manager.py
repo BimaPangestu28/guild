@@ -103,6 +103,26 @@ def read_conventions():
 
 
 # ---------------------------------------------------------------------------
+# Quest context management
+# ---------------------------------------------------------------------------
+
+def clear_quest_context(hero_name):
+    """Clear the current quest section from hero's CLAUDE.md after quest completion."""
+    claude_md = GUILD_DIR / "workspace" / "memory" / "heroes" / hero_name / "CLAUDE.md"
+    if not claude_md.exists():
+        return
+
+    content = claude_md.read_text()
+
+    # Remove the "## Current Quest" section
+    # Match from "## Current Quest" to the next "##" heading or end of file
+    pattern = r'## Current Quest.*?(?=\n## |\Z)'
+    new_content = re.sub(pattern, '## Current Quest\nNo quest assigned. Check with Guild Master or wait for assignment.\n', content, flags=re.DOTALL)
+
+    claude_md.write_text(new_content)
+
+
+# ---------------------------------------------------------------------------
 # Write functions
 # ---------------------------------------------------------------------------
 
@@ -236,7 +256,25 @@ def route_learnings(hero_name, quest_id, learnings, project_name):
                 print(f"  >> Architectural learning -> ADR")
 
             elif category == "project":
-                append_shared_memory(project_name, f"**From {hero_name} ({quest_id}):**\n{learning}")
+                # Check for conflicts and duplicates before appending
+                existing_shared = read_shared_memory(project_name) or ""
+                new_entry = f"**From {hero_name} ({quest_id}):**\n{learning}"
+
+                duplicates = check_duplicate_memory(existing_shared, new_entry)
+                if duplicates:
+                    print(f"  >> Skipping duplicate project learning: {learning[:60]}...")
+                    continue
+
+                conflicts = check_memory_conflict(existing_shared, new_entry)
+                if conflicts:
+                    print(f"  >> WARNING: New learning conflicts with existing memory:")
+                    for existing_line, new_line in conflicts:
+                        print(f"     Existing: {existing_line[:80]}")
+                        print(f"     New:      {new_line[:80]}")
+                    # Still append but mark as potentially conflicting
+                    new_entry = f"**From {hero_name} ({quest_id}):** _(potential conflict detected)_\n{learning}"
+
+                append_shared_memory(project_name, new_entry)
                 print(f"  >> Project learning -> shared memory")
 
             elif category == "personal":
@@ -285,10 +323,64 @@ def extract_patterns_to_skill(hero_name, skill_name, learnings_text):
 
 
 # ---------------------------------------------------------------------------
+# Memory conflict and duplicate detection
+# ---------------------------------------------------------------------------
+
+def check_memory_conflict(existing_content, new_content):
+    """Check if new content contradicts existing shared memory."""
+    # Simple heuristic: check for direct contradictions
+    # Look for lines that negate existing statements
+    existing_lines = set(l.strip().lower() for l in existing_content.split('\n') if l.strip() and not l.startswith('#'))
+    new_lines = [l.strip() for l in new_content.split('\n') if l.strip() and not l.startswith('#')]
+
+    conflicts = []
+    for new_line in new_lines:
+        new_lower = new_line.lower()
+        for existing in existing_lines:
+            # Check for contradicting patterns
+            if _lines_contradict(existing, new_lower):
+                conflicts.append((existing, new_line))
+
+    return conflicts
+
+
+def _lines_contradict(line_a, line_b):
+    """Simple contradiction detection between two statements."""
+    # Check if one negates the other
+    negations = [
+        ("always", "never"), ("must", "must not"), ("should", "should not"),
+        ("use", "don't use"), ("enable", "disable"), ("true", "false"),
+        ("required", "optional"), ("yes", "no"),
+    ]
+    for pos, neg in negations:
+        if (pos in line_a and neg in line_b) or (neg in line_a and pos in line_b):
+            # Check if they're about the same topic (share significant words)
+            words_a = set(line_a.split()) - {'the', 'a', 'an', 'is', 'are', 'to', 'and', 'or', 'not'}
+            words_b = set(line_b.split()) - {'the', 'a', 'an', 'is', 'are', 'to', 'and', 'or', 'not'}
+            overlap = words_a & words_b
+            if len(overlap) >= 2:
+                return True
+    return False
+
+
+def check_duplicate_memory(existing_content, new_content):
+    """Check if new content already exists in memory."""
+    existing_lines = set(l.strip().lower() for l in existing_content.split('\n') if l.strip() and len(l.strip()) > 20)
+    new_lines = [l.strip() for l in new_content.split('\n') if l.strip() and len(l.strip()) > 20]
+
+    duplicates = []
+    for line in new_lines:
+        if line.lower() in existing_lines:
+            duplicates.append(line)
+
+    return duplicates
+
+
+# ---------------------------------------------------------------------------
 # Auto-summarization
 # ---------------------------------------------------------------------------
 
-def check_and_summarize(file_path):
+def check_and_summarize(file_path, conn=None, hero_name=None):
     """If file exceeds threshold, archive it and summarize."""
     file_path = Path(file_path)
     if not file_path.exists():
@@ -298,6 +390,7 @@ def check_and_summarize(file_path):
     if size <= AUTO_SUMMARIZE_THRESHOLD:
         return
 
+    file_size_kb = size / 1024
     print(f"  ~ Auto-summarizing {file_path.name} ({size // 1024}KB > 50KB)")
 
     # Archive the full file
@@ -337,8 +430,31 @@ def check_and_summarize(file_path):
         file_path.write_text(header + summary + "\n")
         print(f"  ~ Summarized {file_path.name}: {size // 1024}KB -> {len(header + summary) // 1024}KB")
 
+        # Log the summarization event
+        if conn:
+            _log_summarize_activity(conn, file_path, file_size_kb, hero_name)
+
     except Exception as e:
         print(f"  ! Summarization failed: {e} (original archived)")
+
+
+def _log_summarize_activity(conn, file_path, file_size_kb, hero_name=None):
+    """Log a summarization event to activity_log."""
+    try:
+        conn.execute(
+            "INSERT INTO activity_log (id, timestamp, actor, action, quest_id, project_id, level) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                datetime.now(timezone.utc).isoformat(),
+                "memory-manager",
+                f"Auto-summarized {file_path} ({file_size_kb:.0f}KB) for {hero_name or 'shared'}",
+                None, None, "info",
+            ),
+        )
+        conn.commit()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

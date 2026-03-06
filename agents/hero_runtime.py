@@ -32,6 +32,7 @@ DEADMAN_TIMER = 7200  # 2 hours with no commits -> escalate
 ERROR_WINDOW = 10  # track last N stderr lines
 ERROR_REPEAT_THRESHOLD = 3  # same error repeated this many times -> circuit break
 MAX_TURNS = 50
+MAX_TOKENS_PER_QUEST = 500_000
 
 
 def get_db():
@@ -68,12 +69,14 @@ def _now_iso():
 class HeroSession:
     """Manages a single Claude Code CLI session for one hero."""
 
-    def __init__(self, hero_id, hero_name, quest_id, project_path, claude_md_path):
+    def __init__(self, hero_id, hero_name, quest_id, project_path, claude_md_path,
+                 mcp_config_path=None):
         self.hero_id = hero_id
         self.hero_name = hero_name
         self.quest_id = quest_id
         self.project_path = project_path
         self.claude_md_path = claude_md_path
+        self.mcp_config_path = mcp_config_path
 
         self.process = None
         self.pid = None
@@ -244,6 +247,43 @@ class HeroSession:
 
         return {"stdout": stdout_str, "stderr": stderr_str}
 
+    def check_mcp_health(self):
+        """Check if MCPs are still healthy during session."""
+        if not self.mcp_config_path:
+            return
+
+        try:
+            config = json.loads(Path(self.mcp_config_path).read_text())
+            for name, server in config.get("mcpServers", {}).items():
+                if "url" in server:
+                    try:
+                        from urllib.request import urlopen, Request
+                        req = Request(server["url"], method="HEAD")
+                        urlopen(req, timeout=5)
+                    except Exception:
+                        self._log_mcp_warning(name)
+                elif "command" in server:
+                    import shutil
+                    if not shutil.which(server["command"]):
+                        self._log_mcp_warning(name)
+        except Exception:
+            pass
+
+    def _log_mcp_warning(self, mcp_name):
+        """Log MCP unreachable warning."""
+        print(f"  WARN: MCP '{mcp_name}' unreachable during session for {self.hero_name}")
+        conn = get_db()
+        try:
+            log_activity(
+                conn,
+                self.hero_name,
+                f"MCP '{mcp_name}' unreachable during session",
+                quest_id=self.quest_id,
+                level="warning",
+            )
+        finally:
+            conn.close()
+
 
 class SessionManager:
     """Manages all active hero sessions."""
@@ -381,6 +421,9 @@ class SessionManager:
             # Read any buffered output (keeps last_output_at updated)
             output = session.get_output()
 
+            # Check MCP health periodically
+            session.check_mcp_health()
+
             if not session.is_alive():
                 dead_sessions.append((hero_id, session))
                 continue
@@ -395,11 +438,43 @@ class SessionManager:
             if session.stderr_buffer:
                 self._check_circuit_breaker(hero_id, session)
 
+            # Max tokens per quest circuit breaker
+            if self.check_token_usage(session.hero_name):
+                print(f"  !! Hero {session.hero_name} exceeded max tokens per quest -- terminating")
+                session.stop()
+                del self.sessions[hero_id]
+                conn = get_db()
+                try:
+                    conn.execute(
+                        "UPDATE quests SET status = 'blocked' WHERE id = ?",
+                        (session.quest_id,),
+                    )
+                    conn.execute(
+                        "UPDATE heroes SET status = 'blocked', session_pid = NULL WHERE id = ?",
+                        (hero_id,),
+                    )
+                    conn.commit()
+                    log_activity(
+                        conn,
+                        session.hero_name,
+                        f"Quest {session.quest_id} blocked: exceeded {MAX_TOKENS_PER_QUEST} token limit",
+                        quest_id=session.quest_id,
+                        level="error",
+                    )
+                finally:
+                    conn.close()
+                continue
+
             # Dead-man timer: session running too long with no commits
             if session.started_at:
                 runtime = time.time() - session.started_at
                 if runtime > DEADMAN_TIMER:
                     self._check_deadman_timer(hero_id, session)
+
+        # Safety checks for all active sessions
+        for hero_id, session in list(self.sessions.items()):
+            self.check_scope_violation(hero_id, session)
+            self.check_branch_violation(hero_id, session)
 
         # Handle dead sessions
         for hero_id, session in dead_sessions:
@@ -475,6 +550,150 @@ class SessionManager:
                 "stderr_recent": list(session.stderr_buffer)[-3:] if session.stderr_buffer else [],
             }
         return statuses
+
+    def check_token_usage(self, hero_name):
+        """Check if hero's current quest has exceeded token limit."""
+        try:
+            conn = get_db()
+            hero = conn.execute(
+                "SELECT current_quest_id FROM heroes WHERE name = ?",
+                (hero_name,),
+            ).fetchone()
+            if not hero or not hero["current_quest_id"]:
+                conn.close()
+                return False
+
+            quest_id = hero["current_quest_id"]
+            row = conn.execute(
+                "SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as total "
+                "FROM cost_log WHERE quest_id = ?",
+                (quest_id,),
+            ).fetchone()
+            conn.close()
+
+            if row and row["total"] > MAX_TOKENS_PER_QUEST:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def check_scope_violation(self, hero_id, session):
+        """Check if hero modified files outside their assigned project."""
+        try:
+            conn = get_db()
+            hero = conn.execute("SELECT * FROM heroes WHERE id = ?", (hero_id,)).fetchone()
+            if not hero or not hero["current_quest_id"]:
+                conn.close()
+                return
+
+            quest = conn.execute("SELECT * FROM quests WHERE id = ?", (hero["current_quest_id"],)).fetchone()
+            if not quest or not quest["project_id"]:
+                conn.close()
+                return
+
+            project = conn.execute("SELECT * FROM projects WHERE id = ?", (quest["project_id"],)).fetchone()
+            if not project or not project["path"]:
+                conn.close()
+                return
+
+            project_path = os.path.abspath(project["path"])
+
+            result = subprocess.run(
+                ["git", "-C", project_path, "diff", "--name-only", "HEAD~1..HEAD"],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode != 0:
+                conn.close()
+                return
+
+            violations = []
+            for file_path in result.stdout.strip().split('\n'):
+                if not file_path:
+                    continue
+                full_path = os.path.abspath(os.path.join(project_path, file_path))
+                if not full_path.startswith(project_path):
+                    violations.append(file_path)
+
+            if violations:
+                log_activity(
+                    conn, session.hero_name,
+                    f"SCOPE VIOLATION: {session.hero_name} modified files outside project: {', '.join(violations[:5])}",
+                    quest_id=quest["id"], project_id=quest["project_id"], level="warning",
+                )
+
+                subprocess.run(
+                    ["git", "-C", project_path, "revert", "--no-edit", "HEAD"],
+                    capture_output=True, timeout=30
+                )
+
+                log_activity(
+                    conn, session.hero_name,
+                    f"Auto-reverted out-of-scope changes by {session.hero_name}",
+                    quest_id=quest["id"], project_id=quest["project_id"], level="warning",
+                )
+
+            conn.close()
+        except Exception:
+            pass
+
+    def check_branch_violation(self, hero_id, session):
+        """Check if hero is on main/master branch."""
+        try:
+            conn = get_db()
+            hero = conn.execute("SELECT * FROM heroes WHERE id = ?", (hero_id,)).fetchone()
+            if not hero or not hero["current_quest_id"]:
+                conn.close()
+                return
+
+            quest = conn.execute("SELECT * FROM quests WHERE id = ?", (hero["current_quest_id"],)).fetchone()
+            if not quest or not quest["project_id"]:
+                conn.close()
+                return
+
+            project = conn.execute("SELECT * FROM projects WHERE id = ?", (quest["project_id"],)).fetchone()
+            if not project or not project["path"]:
+                conn.close()
+                return
+
+            result = subprocess.run(
+                ["git", "-C", project["path"], "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=10
+            )
+
+            current_branch = result.stdout.strip()
+            protected = {project["main_branch"] if "main_branch" in project.keys() else "main", "master"}
+
+            if current_branch in protected:
+                log_activity(
+                    conn, session.hero_name,
+                    f"BRANCH VIOLATION: {session.hero_name} on protected branch '{current_branch}' — suspending",
+                    quest_id=quest["id"], project_id=quest["project_id"], level="warning",
+                )
+
+                if quest["branch"]:
+                    subprocess.run(
+                        ["git", "-C", project["path"], "checkout", quest["branch"]],
+                        capture_output=True, timeout=10
+                    )
+
+                conn.execute("UPDATE heroes SET status = 'suspended' WHERE id = ?", (hero_id,))
+                conn.commit()
+
+                try:
+                    from telegram_bot import TelegramBot
+                    bot = TelegramBot()
+                    if bot.token and bot.chat_id:
+                        bot.notify_escalation(
+                            quest["id"],
+                            f"Hero {session.hero_name} attempted to work on protected branch '{current_branch}'. Hero suspended.",
+                        )
+                except Exception:
+                    pass
+
+            conn.close()
+        except Exception:
+            pass
 
     # --- Internal helpers ---
 

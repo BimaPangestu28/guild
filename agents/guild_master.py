@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import threading
 import time
 import uuid
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import anthropic
 
-from memory_manager import read_shared_memory, route_learnings, update_proficiency
+from memory_manager import clear_quest_context, read_shared_memory, route_learnings, update_proficiency
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +152,10 @@ Quest tiers:
 - EPIC: 2-4 hours, complex feature
 - LEGENDARY: full subsystem (decompose into smaller quests)
 - BOSS: entire project phase (MUST decompose, never assign directly)
+
+IMPORTANT:
+- BOSS tier quests must always be decomposed into smaller quests. Never create a single BOSS quest.
+- Each quest should represent at most 4 hours of work. If larger, decompose into multiple quests.
 
 Quest types: feature, bugfix, test, review, fix, chore, refactor, docs
 
@@ -295,14 +300,40 @@ def build_context(conn, inbox_content=None, hero_reports=None):
     return ctx
 
 
+def _enforce_quest_rules(conn, quests_data):
+    """Enforce quest creation rules before inserting."""
+    for quest in quests_data:
+        # Boss tier must be decomposed, never assigned directly
+        if quest.get("tier") == "BOSS":
+            # Don't create BOSS quests directly - they should be decomposed further
+            log_activity(conn, "guild-master",
+                f"BOSS tier quest rejected — must be decomposed: {quest.get('title', 'untitled')}")
+            continue
+
+        # Max 4h estimated work per quest - if description suggests large scope, split
+        yield quest
+
+
 def process_actions(conn, response_data):
     """Process Guild Master's action list."""
     actions = response_data.get("actions", [])
     created_quests = []
     current_chain_id = None
 
+    # Filter quest actions through enforcement rules
+    quest_actions = [a for a in actions if a.get("type") == "create_quest"]
+    enforced_quests = set()
+    for idx, q in enumerate(quest_actions):
+        for _ in _enforce_quest_rules(conn, [q]):
+            enforced_quests.add(id(q))
+
     for action in actions:
         action_type = action.get("type")
+
+        if action_type == "create_quest" and id(action) not in enforced_quests:
+            print(f"  ! Skipping BOSS tier quest: {action.get('title')}")
+            created_quests.append(None)  # placeholder to keep indices aligned
+            continue
 
         if action_type == "create_chain":
             chain_id = str(uuid.uuid4())
@@ -360,6 +391,10 @@ def process_actions(conn, response_data):
             hero_name = action.get("hero_name")
 
             if quest_idx >= len(created_quests) or not hero_name:
+                continue
+
+            if created_quests[quest_idx] is None:
+                print(f"  ! Skipping assignment — quest at index {quest_idx} was rejected by enforcement rules")
                 continue
 
             quest_id = created_quests[quest_idx]["id"]
@@ -496,6 +531,9 @@ def process_hero_report(conn, hero_name, content):
             hero_row = conn.execute("SELECT id FROM heroes WHERE name = ?", (hero_name,)).fetchone()
             if hero_row:
                 update_proficiency(hero_row["id"], project_name)
+
+        # Clear quest context from hero's CLAUDE.md after completion
+        clear_quest_context(hero_name)
 
     # Save learnings to hero history
     hero_dir = GUILD_DIR / "workspace" / "memory" / "heroes" / hero_name
@@ -1309,6 +1347,38 @@ def _create_chore_quest(conn, project, issues):
     log_activity(conn, "guild-master", f"Auto-created chore quest {quest_id} for {project['name']}", quest_id=quest_id, project_id=project["id"])
 
 
+def monitor_development_branch(conn):
+    """Check if development branch has completed chains ready for main merge."""
+    chains = conn.execute(
+        "SELECT qc.*, p.path, p.main_branch, p.dev_branch, p.name as project_name "
+        "FROM quest_chains qc "
+        "JOIN projects p ON qc.project_id = p.id "
+        "WHERE qc.status = 'done'"
+    ).fetchall()
+
+    for chain in chains:
+        if not chain["path"] or not os.path.isdir(chain["path"]):
+            continue
+
+        pending = conn.execute(
+            "SELECT id FROM activity_log WHERE action LIKE ? AND action LIKE '%merge_pending%'",
+            (f"%{chain['id'][:8]}%",),
+        ).fetchone()
+        if pending:
+            continue
+
+        try:
+            result = subprocess.run(
+                ["git", "-C", chain["path"], "log",
+                 f"{chain['main_branch']}..{chain['dev_branch']}", "--oneline"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.stdout.strip():
+                check_merge_ready(conn, chain["id"])
+        except Exception:
+            pass
+
+
 def run_cycle(client):
     """Run one Guild Master cycle."""
     bot = _load_telegram_bot()
@@ -1360,6 +1430,8 @@ def run_cycle(client):
     # Proactive checks
     check_idle_prs(conn)
     check_project_health(conn)
+
+    monitor_development_branch(conn)
 
     conn.close()
 

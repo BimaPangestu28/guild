@@ -136,6 +136,23 @@ fn run_add(
     )?;
     std::fs::create_dir_all(mem_dir.join(format!("{}-adr", project_name)))?;
 
+    // Ensure dev branch exists, create from main if needed
+    let check = Command::new("git")
+        .args(["-C", &project_path.to_string_lossy(), "rev-parse", "--verify", &dev_b])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    if let Ok(output) = check {
+        if !output.status.success() {
+            // Dev branch doesn't exist, create from main
+            println!("  Creating '{}' branch from '{}'...", dev_b, main_b);
+            let _ = Command::new("git")
+                .args(["-C", &project_path.to_string_lossy(), "branch", &dev_b, &main_b])
+                .status();
+        }
+    }
+
     db::log_activity(
         &conn,
         "system",
