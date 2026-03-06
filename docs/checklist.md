@@ -274,8 +274,8 @@
 ### 3.7 Auto-Skill Learning
 - [x] On quest completion: check if project-related skill exists (via proficiency tracking)
 - [x] Exists → increment proficiency based on quest count
-- [ ] Not exists → create new learned skill (proficiency=1)
-- [ ] Parse outbox for new patterns/gotchas → append ke skill backing file
+- [x] Not exists → create new learned skill (proficiency=1)
+- [x] Parse outbox for new patterns/gotchas → append ke skill backing file
 - [x] At proficiency >= 4 → extract ke shared memory
 
 ### 3.8 Cost Tracking
@@ -316,7 +316,7 @@
 - [x] After test pass → create PR → auto-spawn review quest (Phase 3)
 - [x] After review approved → mark chain done (Phase 3)
 - [x] After review changes requested → create fix quest → assign back to implementor
-- [ ] Common quests (<1hr, low risk) may skip test/review — log this decision
+- [x] Common quests (<1hr, low risk) may skip test/review — log this decision
 - [x] Enforce chain rule: no hero holds two roles in same chain (Phase 3)
 
 ### 4.4 Branch Protection Setup
@@ -344,14 +344,14 @@
 ### 4.7 Commit Convention Enforcement
 - [x] Heroes follow: `[GLD-{id}] {short description} — {hero_name}` (in CLAUDE.md rules)
 - [x] Guild Master validates commit messages dari hero sessions
-- [ ] WIP commit on pause: `[GLD-{id}] WIP — paused by developer — {hero_name}`
+- [x] WIP commit on pause: `[GLD-{id}] WIP — paused by developer — {hero_name}`
 
 ### 4.8 File-Level Locking
-- [ ] Before quest assignment: parse description, identify likely files
+- [x] Before quest assignment: parse description, identify likely files
 - [x] Check `file_locks` table for conflicts (`db::lock_files`)
-- [ ] If conflict: queue quest until lock released
+- [x] If conflict: queue quest until lock released
 - [x] On quest completion/cancel: release all locks (`db::release_locks`)
-- [ ] Auto-activate queued quests when lock released
+- [x] Auto-activate queued quests when lock released
 - [x] `guild locks` — show active file locks
 
 ---
@@ -425,25 +425,25 @@
 - [x] Merge approval request format
 - [x] Cost warning format
 - [x] Escalation format (problem, options, A/B choice)
-- [ ] Conversation context: store last 10 messages, clear daily
+- [x] Conversation context: store last 10 messages, clear daily
 
 ### 5.9 Telegram Daily Briefing
-- [ ] Configurable time: `guild config --set daily-briefing-time {HH:MM}`
+- [x] Configurable time: `guild config --set daily-briefing-time {HH:MM}`
 - [x] Content: active quests, hero availability, priorities, blockers
 - [x] Max 200 words
 
 ### 5.10 Proactive Behaviors
 - [x] Idle hero check: hero → idle → check backlog → auto-assign if match (Phase 3)
 - [ ] On code push: test coverage delta, lint errors, TODO additions
-- [ ] Weekly codebase health scan per active project
-- [ ] Auto-create chore quests above threshold (outdated deps, coverage drop, etc.)
-- [ ] PR idle > 24h: re-ping reviewer or reassign
+- [x] Weekly codebase health scan per active project
+- [x] Auto-create chore quests above threshold (outdated deps, coverage drop, etc.)
+- [x] PR idle > 24h: re-ping reviewer or reassign
 
 ### 5.11 Notification Level Configuration
 - [x] `guild setup-telegram` — adjust notification levels
 - [ ] Per-event level customization
-- [ ] Telegram API unreachable → queue notifications, retry every 5 min
-- [ ] Bot token invalid → disable Telegram, fallback to dashboard-only
+- [x] Telegram API unreachable → queue notifications, retry every 5 min
+- [x] Bot token invalid → disable Telegram, fallback to dashboard-only
 
 ---
 
@@ -472,7 +472,7 @@
 - [x] Polling (5s interval) untuk live hero status, quests, projects, log
 - [x] Quest status changes reflected via polling
 - [x] Activity log auto-refresh
-- [ ] Queued Telegram notifications visible in dashboard
+- [x] Queued Telegram notifications visible in dashboard
 
 ### 6.4 License System
 - [x] Offline license key verification algorithm
