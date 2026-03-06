@@ -63,9 +63,9 @@
 - [x] Create directory structure (1.3)
 - [x] Initialize SQLite database (1.2)
 - [x] Optional: Telegram setup prompt (store token + chat ID)
-- [ ] Optional: License key prompt (Free tier default)
+- [x] Optional: License key prompt (Free tier default)
 - [x] Optional: Recruit first hero (interactive class selection, name input)
-- [ ] Optional: Register first project (`guild project add` flow)
+- [x] Optional: Register first project (`guild project add` flow)
 - [x] Print summary dan next steps
 
 ### 1.5 CLI — `guild project add`
@@ -77,7 +77,7 @@
 - [x] Check `dev_branch` exists — create from main kalau belum ada
 - [x] Create shared memory template: `workspace/memory/shared/projects/{name}.md`
 - [x] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
-- [ ] Create project config summary: `workspace/projects/{name}/config.md`
+- [x] Create project config summary: `workspace/projects/{name}/config.md`
 - [x] Insert project record ke `guild.db`
 - [ ] Scan TODOs/open issues — offer to create quests (optional)
 
@@ -339,7 +339,7 @@
 - [x] `guild project group list`
 - [x] `guild project group show {name}`
 - [ ] Cross-repo quest chains: each repo gets own branch/PR, linked under one chain ID
-- [ ] Shared memory across repos in group
+- [x] Shared memory across repos in group
 
 ### 4.7 Commit Convention Enforcement
 - [x] Heroes follow: `[GLD-{id}] {short description} — {hero_name}` (in CLAUDE.md rules)
@@ -434,14 +434,14 @@
 
 ### 5.10 Proactive Behaviors
 - [x] Idle hero check: hero → idle → check backlog → auto-assign if match (Phase 3)
-- [ ] On code push: test coverage delta, lint errors, TODO additions
+- [x] On code push: test coverage delta, lint errors, TODO additions
 - [x] Weekly codebase health scan per active project
 - [x] Auto-create chore quests above threshold (outdated deps, coverage drop, etc.)
 - [x] PR idle > 24h: re-ping reviewer or reassign
 
 ### 5.11 Notification Level Configuration
 - [x] `guild setup-telegram` — adjust notification levels
-- [ ] Per-event level customization
+- [x] Per-event level customization
 - [x] Telegram API unreachable → queue notifications, retry every 5 min
 - [x] Bot token invalid → disable Telegram, fallback to dashboard-only
 
