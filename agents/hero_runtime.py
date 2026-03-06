@@ -327,14 +327,41 @@ class SessionManager:
             conn.close()
 
     def stop_hero(self, hero_id):
-        """Stop a hero session and remove it from tracking."""
+        """Stop a hero session, create WIP commit, and remove from tracking."""
         session = self.sessions.get(hero_id)
         if session:
+            self._wip_commit(session)
             session.stop()
             del self.sessions[hero_id]
             print(f"  - Stopped session for {session.hero_name}")
         else:
             print(f"  ! No active session for hero {hero_id}")
+
+    def _wip_commit(self, session):
+        """Create a WIP commit for paused hero if there are uncommitted changes."""
+        if not session.quest_id:
+            return
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(session.project_path),
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.stdout.strip():
+                subprocess.run(
+                    ["git", "add", "-A"],
+                    cwd=str(session.project_path),
+                    check=True, timeout=10,
+                )
+                msg = f"[{session.quest_id}] WIP -- paused by developer -- {session.hero_name}"
+                subprocess.run(
+                    ["git", "commit", "-m", msg],
+                    cwd=str(session.project_path),
+                    check=True, timeout=10,
+                )
+                print(f"  ~ WIP commit created for {session.hero_name}")
+        except Exception:
+            pass
 
     def stop_all(self):
         """Stop all active sessions."""

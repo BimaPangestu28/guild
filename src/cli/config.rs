@@ -86,7 +86,7 @@ fn run_show() -> Result<()> {
 
 fn run_set(key: String, value: String) -> Result<()> {
     // Keys that are stored in the DB config table
-    let db_keys = ["cost-cap-daily"];
+    let db_keys = ["cost-cap-daily", "daily-briefing-time"];
 
     if db_keys.contains(&key.as_str()) {
         let conn = db::open()?;

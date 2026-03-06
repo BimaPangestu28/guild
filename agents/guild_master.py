@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import anthropic
@@ -686,9 +686,29 @@ def _get_original_implementor(conn, chain_id):
     return None
 
 
+def _should_skip_chain(quest):
+    """COMMON tier quests skip test/review steps."""
+    return quest["tier"] == "COMMON"
+
+
 def _auto_create_next_quest(conn, completed_quest, client):
     """If the completed quest is part of a sequence, create the next quest in the chain."""
     quest_type = completed_quest["type"]
+
+    if _should_skip_chain(completed_quest) and quest_type in ("feature", "bugfix", "fix"):
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE quest_chains SET status = 'done', completed_at = ? WHERE id = ?",
+            (now, completed_quest["chain_id"]),
+        )
+        log_activity(conn, "guild-master",
+                     f"Chain {completed_quest['chain_id'][:8]} completed (COMMON tier, skipped test/review)",
+                     project_id=completed_quest["project_id"])
+        print(f"  >> Chain {completed_quest['chain_id'][:8]} completed (COMMON, skipped test/review)")
+        check_merge_ready(conn, completed_quest["chain_id"])
+        conn.commit()
+        return
+
     next_type = _CHAIN_SEQUENCE.get(quest_type)
     if not next_type:
         # review completed (or other terminal type) → check for changes_requested or mark chain done
@@ -941,6 +961,53 @@ def check_merge_ready(conn, chain_id):
 
 
 # ---------------------------------------------------------------------------
+# File lock conflict detection
+# ---------------------------------------------------------------------------
+
+def _extract_likely_files(description):
+    """Extract file paths from quest description."""
+    patterns = [
+        r'`([a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)`',
+        r'(?:^|\s)((?:src|lib|app|agents|dashboard)/[a-zA-Z0-9_/\-\.]+)',
+    ]
+    files = set()
+    for pattern in patterns:
+        matches = re.findall(pattern, description)
+        files.update(matches)
+    return list(files)
+
+
+def check_file_conflicts(conn, quest):
+    """Check if quest's likely files conflict with existing locks."""
+    likely_files = _extract_likely_files(quest["description"] or "")
+    if not likely_files:
+        return []
+
+    conflicts = []
+    for f in likely_files:
+        lock = conn.execute(
+            "SELECT * FROM file_locks WHERE file_path = ?", (f,)
+        ).fetchone()
+        if lock and lock["quest_id"] != quest["id"]:
+            conflicts.append((f, lock["quest_id"], lock["hero_id"]))
+    return conflicts
+
+
+def activate_queued_quests(conn):
+    """Check if any queued quests can now proceed."""
+    queued = conn.execute(
+        "SELECT * FROM quests WHERE status = 'queued' ORDER BY created_at ASC"
+    ).fetchall()
+
+    for quest in queued:
+        conflicts = check_file_conflicts(conn, quest)
+        if not conflicts:
+            conn.execute("UPDATE quests SET status = 'backlog' WHERE id = ?", (quest["id"],))
+            log_activity(conn, "guild-master", f"Quest {quest['id']} unqueued — file conflicts resolved", quest_id=quest["id"])
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
 # Auto-assign idle heroes to backlog quests
 # ---------------------------------------------------------------------------
 
@@ -955,6 +1022,15 @@ def _auto_assign_idle_heroes(conn):
         return
 
     for quest in backlog_quests:
+        conflicts = check_file_conflicts(conn, quest)
+        if conflicts:
+            log_activity(conn, "guild-master",
+                         f"Quest {quest['id']} queued — file conflict with {conflicts[0][1]}",
+                         quest_id=quest["id"])
+            conn.execute("UPDATE quests SET status = 'queued' WHERE id = ?", (quest["id"],))
+            conn.commit()
+            continue
+
         req_skills = json.loads(quest["req_skills"]) if quest["req_skills"] else []
         hero = find_best_hero(conn, req_skills)
         if not hero:
@@ -1123,9 +1199,125 @@ def _cycle_watchdog(timeout=CYCLE_TIMEOUT):
     return timer
 
 
+# ---------------------------------------------------------------------------
+# Proactive checks
+# ---------------------------------------------------------------------------
+
+def check_idle_prs(conn):
+    """Check for review quests that have been active > 24 hours."""
+    threshold = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    idle_reviews = conn.execute(
+        "SELECT q.*, h.name as hero_name FROM quests q "
+        "LEFT JOIN heroes h ON q.assigned_to = h.id "
+        "WHERE q.type = 'review' AND q.status = 'active' AND q.created_at < ?",
+        (threshold,)
+    ).fetchall()
+
+    for quest in idle_reviews:
+        already_pinged = conn.execute(
+            "SELECT id FROM activity_log WHERE quest_id = ? AND action LIKE '%idle_ping%' AND timestamp > ?",
+            (quest["id"], (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat())
+        ).fetchone()
+        if already_pinged:
+            continue
+
+        log_activity(conn, "guild-master", f"idle_ping: Review {quest['id']} idle > 24h, assigned to {quest['hero_name'] or 'unassigned'}", quest_id=quest["id"])
+
+        bot = _load_telegram_bot()
+        if bot:
+            bot.notify_escalation(quest["id"], f"Review quest idle > 24 hours. Hero: {quest['hero_name'] or 'unassigned'}")
+
+    conn.commit()
+
+
+def check_project_health(conn):
+    """Periodic project health checks - run weekly."""
+    last_check = conn.execute(
+        "SELECT timestamp FROM activity_log WHERE action LIKE '%weekly_health_check%' ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+
+    if last_check:
+        last_dt = datetime.fromisoformat(last_check["timestamp"].replace("Z", "+00:00"))
+        if (datetime.now(timezone.utc) - last_dt).days < 7:
+            return
+
+    projects = conn.execute("SELECT * FROM projects WHERE status = 'active'").fetchall()
+    for project in projects:
+        path = project["path"]
+        if not path or not os.path.isdir(path):
+            continue
+
+        issues = []
+
+        todo_count = _count_todos(path)
+        if todo_count > 20:
+            issues.append(f"{todo_count} TODO/FIXME comments found")
+
+        large_files = _find_large_files(path, threshold_kb=500)
+        if large_files:
+            issues.append(f"{len(large_files)} files > 500KB")
+
+        if issues:
+            _create_chore_quest(conn, project, issues)
+
+    log_activity(conn, "guild-master", "weekly_health_check completed")
+    conn.commit()
+
+
+def _count_todos(path):
+    count = 0
+    skip_dirs = {'.git', 'node_modules', 'target', '__pycache__', 'dist', 'build', '.next', 'vendor'}
+    for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for f in files:
+            if f.endswith(('.py', '.rs', '.ts', '.tsx', '.js', '.jsx', '.go', '.java')):
+                try:
+                    content = open(os.path.join(root, f), 'r', errors='ignore').read()
+                    count += content.count('TODO') + content.count('FIXME') + content.count('HACK')
+                except Exception:
+                    pass
+    return count
+
+
+def _find_large_files(path, threshold_kb=500):
+    large = []
+    skip_dirs = {'.git', 'node_modules', 'target', '__pycache__', 'dist', 'build'}
+    for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if os.path.getsize(fp) > threshold_kb * 1024:
+                    large.append(fp)
+            except Exception:
+                pass
+    return large
+
+
+def _create_chore_quest(conn, project, issues):
+    quest_id = f"GLD-{uuid.uuid4().hex[:6].upper()}"
+    now = datetime.now(timezone.utc).isoformat()
+    description = "Auto-generated chore quest from weekly health check:\n\n"
+    for issue in issues:
+        description += f"- {issue}\n"
+
+    conn.execute(
+        "INSERT INTO quests (id, title, description, tier, type, status, project_id, req_skills, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (quest_id, f"[chore] Code health: {project['name']}", description, "COMMON", "chore", "backlog", project["id"], project.get("language", "") or "", now)
+    )
+    log_activity(conn, "guild-master", f"Auto-created chore quest {quest_id} for {project['name']}", quest_id=quest_id, project_id=project["id"])
+
+
 def run_cycle(client):
     """Run one Guild Master cycle."""
+    bot = _load_telegram_bot()
+    if bot:
+        bot.flush_queue()
+
     conn = get_db()
+
+    activate_queued_quests(conn)
 
     # Check for new goals
     inbox_content = read_inbox()
@@ -1164,6 +1356,10 @@ def run_cycle(client):
 
     # Handle blocked quests (escalating strategy)
     _handle_blocked_quests(conn, client)
+
+    # Proactive checks
+    check_idle_prs(conn)
+    check_project_health(conn)
 
     conn.close()
 

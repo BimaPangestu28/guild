@@ -243,8 +243,45 @@ def route_learnings(hero_name, quest_id, learnings, project_name):
                 update_hero_notes(hero_name, f"**Quest {quest_id}:**\n{learning}")
                 print(f"  >> Personal learning -> hero notes")
 
+        # Extract patterns to skill backing file
+        conn = get_db()
+        try:
+            project_row = conn.execute("SELECT language FROM projects WHERE name = ?", (project_name,)).fetchone()
+            skill_name = (project_row["language"] or project_name).lower().strip() if project_row else project_name.lower().strip()
+        finally:
+            conn.close()
+        if skill_name:
+            extract_patterns_to_skill(hero_name, skill_name, learnings)
+
     except Exception as e:
         print(f"  ! Failed to route learnings: {e}")
+
+
+def extract_patterns_to_skill(hero_name, skill_name, learnings_text):
+    """Extract patterns and gotchas from learnings and append to skill backing file."""
+    if not learnings_text or not learnings_text.strip():
+        return
+
+    skill_file = HEROES_DIR / hero_name / "skills" / f"{skill_name}.md"
+    if not skill_file.exists():
+        return
+
+    patterns = []
+    for line in learnings_text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if any(kw in lower for kw in ['gotcha', 'pattern', 'tip', 'trick', 'important', 'note:', 'warning:', 'learned', 'discovered', 'found that', 'turns out']):
+            patterns.append(line)
+
+    if patterns:
+        existing = skill_file.read_text()
+        addition = f"\n\n## Patterns (auto-extracted)\n"
+        for p in patterns:
+            addition += f"- {p}\n"
+        skill_file.write_text(existing + addition)
+        print(f"  + Extracted {len(patterns)} pattern(s) to {hero_name}/{skill_name} skill file")
 
 
 # ---------------------------------------------------------------------------
@@ -319,15 +356,44 @@ def update_proficiency(hero_id, project_name):
       21+ quests  -> level 5
 
     At proficiency >= 4, extract key learnings to shared project memory.
+    Also auto-creates a learned skill entry if none exists for the project's domain.
     """
     conn = get_db()
 
-    # Resolve project ID
-    project_row = conn.execute("SELECT id FROM projects WHERE name = ?", (project_name,)).fetchone()
+    # Resolve project
+    project_row = conn.execute("SELECT id, language FROM projects WHERE name = ?", (project_name,)).fetchone()
     if not project_row:
         conn.close()
         return
     project_id = project_row["id"]
+
+    # Resolve hero name
+    hero_row = conn.execute("SELECT name FROM heroes WHERE id = ?", (hero_id,)).fetchone()
+    hero_name = hero_row["name"] if hero_row else None
+
+    # Auto-create skill for project domain if it doesn't exist
+    skill_name = (project_row["language"] or project_name).lower().strip()
+    if skill_name and hero_name:
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            existing_skill = conn.execute(
+                "SELECT id FROM hero_skills WHERE hero_id = ? AND name = ?",
+                (hero_id, skill_name)
+            ).fetchone()
+            if not existing_skill:
+                conn.execute(
+                    "INSERT INTO hero_skills (id, hero_id, name, type, proficiency, source, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(uuid.uuid4()), hero_id, skill_name, "learned", 1, f"quest:{project_name}", now, now)
+                )
+                skill_dir = HEROES_DIR / hero_name / "skills"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                skill_file = skill_dir / f"{skill_name}.md"
+                if not skill_file.exists():
+                    skill_file.write_text(f"# {skill_name}\n\nLearned from working on {project_name}.\n")
+                print(f"  + Auto-created skill '{skill_name}' for {hero_name}")
+        except sqlite3.OperationalError:
+            pass
 
     # Count completed quests for this hero + project
     count_row = conn.execute(
@@ -370,14 +436,11 @@ def update_proficiency(hero_id, project_name):
             )
         conn.commit()
     except sqlite3.OperationalError:
-        # Table may not exist yet; silently skip
         pass
 
     # At proficiency >= 4, extract key learnings to shared memory
     if prof_level >= 4 and (not existing or existing["level"] < 4):
-        hero_row = conn.execute("SELECT name FROM heroes WHERE id = ?", (hero_id,)).fetchone()
-        if hero_row:
-            hero_name = hero_row["name"]
+        if hero_name:
             notes = read_hero_notes(hero_name)
             if notes:
                 append_shared_memory(

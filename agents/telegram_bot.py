@@ -28,6 +28,7 @@ DB_PATH = GUILD_DIR / "guild.db"
 CONFIG_PATH = GUILD_DIR / "config.json"
 INBOX = GUILD_DIR / "workspace" / "inbox"
 OUTBOX = GUILD_DIR / "workspace" / "outbox"
+NOTIFICATION_QUEUE_FILE = GUILD_DIR / "notification_queue.jsonl"
 
 POLL_INTERVAL = 10  # seconds
 
@@ -36,6 +37,10 @@ LEVEL_SILENT = 1     # Log only
 LEVEL_DASHBOARD = 2  # Log + store for dashboard
 LEVEL_TELEGRAM = 3   # Send Telegram message
 LEVEL_URGENT = 4     # Send Telegram with warning prefix
+
+CONVERSATION_FILE = GUILD_DIR / "telegram_context.json"
+NOTIFICATION_JSONL = GUILD_DIR / "notifications.jsonl"
+MAX_CONTEXT_MESSAGES = 10
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +67,46 @@ class TelegramBot:
             self.notification_level = int(tg.get("notification_level", 3))
 
         self.api_base = TELEGRAM_API.format(token=self.token)
+        self.context = self._load_context()
+
+    def _load_context(self):
+        """Load conversation context."""
+        try:
+            if CONVERSATION_FILE.exists():
+                data = json.loads(CONVERSATION_FILE.read_text())
+                if data.get("date") != datetime.now(timezone.utc).strftime("%Y-%m-%d"):
+                    return {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "messages": []}
+                return data
+        except Exception:
+            pass
+        return {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "messages": []}
+
+    def _save_context(self):
+        """Save conversation context."""
+        CONVERSATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONVERSATION_FILE.write_text(json.dumps(self.context))
+
+    def _add_to_context(self, role, text):
+        """Add a message to context (role: 'user' or 'bot')."""
+        self.context["messages"].append({
+            "role": role,
+            "text": text[:500],
+            "time": datetime.now(timezone.utc).strftime("%H:%M")
+        })
+        self.context["messages"] = self.context["messages"][-MAX_CONTEXT_MESSAGES:]
+        self._save_context()
+
+    def _log_notification(self, text, level=2):
+        """Log notification to JSONL for dashboard visibility."""
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "text": text,
+            "level": level,
+            "sent": bool(self.token and self.chat_id)
+        }
+        NOTIFICATION_JSONL.parent.mkdir(parents=True, exist_ok=True)
+        with open(NOTIFICATION_JSONL, "a") as f:
+            f.write(json.dumps(entry) + "\n")
 
     @staticmethod
     def _load_config():
@@ -88,18 +133,71 @@ class TelegramBot:
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             print(f"  ! Telegram API error {e.code}: {body}")
+            if e.code in (401, 403):
+                self.token = None
             return None
         except urllib.error.URLError as e:
             print(f"  ! Telegram connection error: {e.reason}")
             return None
 
     def send_message(self, text, parse_mode="Markdown"):
-        """Send a text message to the configured chat."""
-        return self._api_call("sendMessage", {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": parse_mode,
-        })
+        """Send a text message with queue fallback."""
+        if not self.token or not self.chat_id:
+            self._queue_notification(text)
+            return False
+
+        result = self._do_send(text, parse_mode)
+        if result:
+            return True
+        self._queue_notification(text)
+        return False
+
+    def _do_send(self, text, parse_mode="Markdown"):
+        """Actual HTTP send to Telegram API. Returns True on success."""
+        try:
+            result = self._api_call("sendMessage", {
+                "chat_id": self.chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+            })
+            return result is not None and result.get("ok", False)
+        except Exception:
+            return False
+
+    def _queue_notification(self, text):
+        """Queue a notification for later delivery."""
+        NOTIFICATION_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"text": text, "timestamp": datetime.now(timezone.utc).isoformat()}
+        with open(NOTIFICATION_QUEUE_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+    def flush_queue(self):
+        """Try to send queued notifications. Called periodically."""
+        if not NOTIFICATION_QUEUE_FILE.exists():
+            return
+
+        lines = NOTIFICATION_QUEUE_FILE.read_text().strip().split("\n")
+        if not lines or lines == ['']:
+            return
+
+        remaining = []
+        failed = False
+        for i, line in enumerate(lines):
+            if failed:
+                remaining.append(line)
+                continue
+            try:
+                entry = json.loads(line)
+                if not self._do_send(entry["text"], "Markdown"):
+                    remaining.append(line)
+                    failed = True
+            except (json.JSONDecodeError, KeyError):
+                pass  # Skip malformed entries
+
+        if remaining:
+            NOTIFICATION_QUEUE_FILE.write_text("\n".join(remaining) + "\n")
+        else:
+            NOTIFICATION_QUEUE_FILE.unlink(missing_ok=True)
 
     def get_updates(self, offset=0):
         """Long-poll for new messages."""
@@ -140,12 +238,14 @@ class TelegramBot:
         msg += f"Hero: {hero_name}\n"
         if chain_id:
             msg += f"Chain: `{chain_id[:8]}`\n"
+        self._log_notification(f"Quest complete: {quest_title} by {hero_name}", level=3)
         self.send_message(msg)
 
     def notify_level_up(self, hero_name, hero_class, new_level):
         """Send a formatted hero level-up notification."""
         msg = "\u2b06\ufe0f *Level Up!*\n\n"
         msg += f"{hero_name} ({hero_class}) reached *Level {new_level}*!"
+        self._log_notification(f"Level up: {hero_name} -> Level {new_level}", level=3)
         self.send_message(msg)
 
     def notify_cost_warning(self, current_cost, cap, percentage):
@@ -155,6 +255,7 @@ class TelegramBot:
         msg += f"Today: ${current_cost:.2f} / ${cap:.2f} ({percentage:.0f}%)\n"
         if percentage >= 100:
             msg += "\u26a0\ufe0f All heroes paused \u2014 daily cap reached."
+        self._log_notification(f"Cost warning: ${current_cost:.2f}/${cap:.2f} ({percentage:.0f}%)", level=4)
         self.send_message(msg)
 
     def notify_escalation(self, quest_id, problem, options=None):
@@ -167,6 +268,7 @@ class TelegramBot:
             for i, opt in enumerate(options):
                 msg += f"  {chr(65+i)}) {opt}\n"
             msg += f"\nReply with your choice."
+        self._log_notification(f"Escalation: {quest_id} — {problem}", level=4)
         self.send_message(msg)
 
     def notify_merge_ready(self, chain_id, goal, project_name):
@@ -176,6 +278,7 @@ class TelegramBot:
         msg += f"Project: {project_name}\n"
         msg += f"Goal: _{goal}_\n\n"
         msg += f"Use `/approve {chain_id[:8]}` or `/reject {chain_id[:8]}`"
+        self._log_notification(f"Merge ready: {project_name} — {goal}", level=3)
         self.send_message(msg)
 
     @staticmethod
@@ -275,13 +378,26 @@ def generate_daily_briefing(conn):
     return "\n".join(lines)
 
 
+def _get_briefing_time(conn):
+    """Get configured briefing time from DB, default 09:00."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM config WHERE key = 'daily-briefing-time'"
+        ).fetchone()
+        if row:
+            return row[0]
+    except Exception:
+        pass
+    return "09:00"
+
+
 def check_daily_briefing(bot, conn, config):
     """Check if it's time to send daily briefing.
 
-    Reads briefing_time from config (default '09:00'), sends once per day,
+    Reads briefing_time from DB config (default '09:00'), sends once per day,
     and records state to avoid duplicate sends.
     """
-    briefing_time = config.get("daily_briefing_time", "09:00")
+    briefing_time = _get_briefing_time(conn)
     now = datetime.now()
     target_hour, target_min = map(int, briefing_time.split(":"))
 
@@ -637,6 +753,8 @@ def handle_message(bot, message):
     if not text.startswith("/"):
         return
 
+    bot._add_to_context("user", text)
+
     # Split command and arguments
     parts = text.split(None, 1)
     command = parts[0].lower()
@@ -650,11 +768,16 @@ def handle_message(bot, message):
     if handler:
         try:
             handler(bot, args)
+            bot._add_to_context("bot", f"Handled {command}")
         except Exception as e:
-            bot.send_message(f"Error handling `{command}`: {e}")
+            reply = f"Error handling `{command}`: {e}"
+            bot.send_message(reply)
+            bot._add_to_context("bot", reply)
             print(f"  ! Error handling {command}: {e}")
     else:
-        bot.send_message(f"Unknown command: `{command}`\nUse /help for available commands.")
+        reply = f"Unknown command: `{command}`\nUse /help for available commands."
+        bot.send_message(reply)
+        bot._add_to_context("bot", reply)
 
 
 # ---------------------------------------------------------------------------
@@ -707,6 +830,12 @@ def main():
                             print(f"  ! Ignored message from chat {msg_chat_id}")
             except Exception as e:
                 print(f"  ! Poll error: {e}")
+
+            # Flush queued notifications
+            try:
+                bot.flush_queue()
+            except Exception as e:
+                print(f"  ! Queue flush error: {e}")
 
             # Check if daily briefing should be sent
             try:
