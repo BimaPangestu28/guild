@@ -74,7 +74,7 @@
 - [x] Validate path exists dan is a git repo
 - [x] Detect primary language dari file extensions
 - [ ] Read existing conventions (.editorconfig, .eslintrc, etc.) ke shared memory
-- [ ] Check `dev_branch` exists — create from main kalau belum ada
+- [x] Check `dev_branch` exists — create from main kalau belum ada
 - [x] Create shared memory template: `workspace/memory/shared/projects/{name}.md`
 - [x] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
 - [ ] Create project config summary: `workspace/projects/{name}/config.md`
@@ -142,8 +142,8 @@
 - [x] Structured output ke `workspace/outbox/guild-master.md` (ANALYSIS, ACTIONS, ESCALATIONS, NEXT)
 - [x] Activity logging ke db untuk setiap action
 - [x] XP reward + level-up on quest completion
-- [ ] Enforce: Boss tier must be decomposed, never assigned directly
-- [ ] Enforce: max 4h estimated work per quest
+- [x] Enforce: Boss tier must be decomposed, never assigned directly
+- [x] Enforce: max 4h estimated work per quest
 
 ### 1.13 Manual Hero Trigger
 - [x] `guild hero {name} --start` generates Claude Code session command
@@ -180,20 +180,20 @@
 - [x] Guild Master reads outbox → processes learnings
 - [x] Route learnings: architectural → ADR, project-wide → shared memory, personal → notes.md
 - [x] Update hero history.md dengan quest completion entry
-- [ ] Clear current quest section dari hero CLAUDE.md
+- [x] Clear current quest section dari hero CLAUDE.md
 
 ### 2.4 Shared Memory Accumulation
 - [x] Guild Master checks hero outbox learnings field
 - [x] Append project-relevant learnings ke `shared/projects/{project}.md`
-- [ ] Detect conflicts dengan existing shared memory (Section 10 Scenario C)
+- [x] Detect conflicts dengan existing shared memory (Section 10 Scenario C)
 - [x] Create ADR untuk architectural decisions (`shared/projects/{name}-adr/adr-NNN.md`)
-- [ ] No duplicate information — check before writing
+- [x] No duplicate information — check before writing
 
 ### 2.5 Auto-Summarization
 - [x] Detect memory file > 50KB
 - [x] Archive current content ke `workspace/memory/heroes/{name}/archive/{date}-notes.md`
 - [x] Summarize ke condensed version
-- [ ] Log summarization event
+- [x] Log summarization event
 
 ### 2.6 Skill System
 - [x] Base skills defined per hero class (from appendix)
@@ -290,7 +290,7 @@
 ### 3.9 Circuit Breaker
 - [x] Detect stuck hero: no output + no commits > configurable threshold
 - [x] Detect looping hero: same error pattern repeated > 3x
-- [ ] Max tokens per quest — terminate session kalau exceeded
+- [x] Max tokens per quest — terminate session kalau exceeded
 - [x] Dead-man timer per quest — escalate kalau exceeded
 - [x] Kill and restart on stuck detection
 
@@ -327,7 +327,7 @@
 - [x] Handle: branch protection setup fails → log warning, remind developer
 
 ### 4.5 Development → Main Merge
-- [ ] Guild Master monitors `development` branch
+- [x] Guild Master monitors `development` branch
 - [x] When ready: send Telegram merge approval request
 - [x] Wait for `/approve {chain_id}` dari developer
 - [x] On approve: create PR development → main, merge
@@ -377,8 +377,8 @@
 ### 5.3 MCP Hero/Project Attachment
 - [x] `guild mcp attach {hero} {mcp} --auto` — permanent attach ke hero
 - [x] `guild mcp detach {hero} {mcp}`
-- [ ] `guild mcp attach --project {name} {mcp}` — project default
-- [ ] `guild mcp detach --project {name} {mcp}`
+- [x] `guild mcp attach --project {name} {mcp}` — project default
+- [x] `guild mcp detach --project {name} {mcp}`
 - [ ] `guild project mcp add {project} {mcp}` (alias)
 - [ ] `guild project mcp remove {project} {mcp}` (alias)
 - [ ] `guild project mcp list {project}` (alias)
@@ -386,7 +386,7 @@
 ### 5.4 MCP Failure Handling
 - [x] Required MCP unreachable → check via health check
 - [x] Optional MCP unreachable → start without it, log warning
-- [ ] MCP crash mid-session → hero continues, logs warning, reports in outbox
+- [x] MCP crash mid-session → hero continues, logs warning, reports in outbox
 
 ### 5.5 Secrets Management (`src/cli/secret.rs`)
 - [x] `guild secret add {name} {value}` — encrypt dan store
@@ -508,8 +508,8 @@
 - [x] Guild Master crash → auto-restart after 30s, re-read state from db
 - [x] Guild Master stuck >10 min → kill and restart
 - [x] guild.db corruption → stop, notify, restore from hourly backup
-- [ ] Hero modifies file outside project scope → revert via git, suspend hero
-- [ ] Hero attempts push to main → block (branch protection), suspend, notify
+- [x] Hero modifies file outside project scope → revert via git, suspend hero
+- [x] Hero attempts push to main → block (branch protection), suspend, notify
 
 ### Testing
 - [x] Rust unit tests untuk db layer, process manager, CLI parsing
