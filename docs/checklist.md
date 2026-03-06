@@ -320,11 +320,11 @@
 - [x] Enforce chain rule: no hero holds two roles in same chain (Phase 3)
 
 ### 4.4 Branch Protection Setup
-- [ ] On `guild project add`: configure branch protection rules via provider API
-- [ ] `main`: no direct push, human approval required
-- [ ] `development`: no direct push, hero reviewer + tests required
+- [x] On `guild project add`: configure branch protection rules via provider API
+- [x] `main`: no direct push, human approval required
+- [x] `development`: no direct push, hero reviewer + tests required
 - [ ] Feature/fix/chore branches: heroes push freely, cannot self-merge
-- [ ] Handle: branch protection setup fails → log warning, remind developer
+- [x] Handle: branch protection setup fails → log warning, remind developer
 
 ### 4.5 Development → Main Merge
 - [ ] Guild Master monitors `development` branch
@@ -421,10 +421,10 @@
 - [x] Level 2 (Dashboard): quest completions, hero level-ups, stored in notifications JSONL
 - [x] Level 3 (Telegram message): blockers, daily briefing, anomalies
 - [x] Level 4 (Telegram urgent): critical failures, cost overrun, requires decision
-- [ ] Quest completion format
-- [ ] Merge approval request format
-- [ ] Cost warning format
-- [ ] Escalation format (problem, options, A/B choice)
+- [x] Quest completion format
+- [x] Merge approval request format
+- [x] Cost warning format
+- [x] Escalation format (problem, options, A/B choice)
 - [ ] Conversation context: store last 10 messages, clear daily
 
 ### 5.9 Telegram Daily Briefing
@@ -506,7 +506,7 @@
 - [x] WARNING: guild continues, logged, included in daily report
 - [x] INFO: guild continues, logged only
 - [x] Guild Master crash → auto-restart after 30s, re-read state from db
-- [ ] Guild Master stuck >10 min → kill and restart
+- [x] Guild Master stuck >10 min → kill and restart
 - [x] guild.db corruption → stop, notify, restore from hourly backup
 - [ ] Hero modifies file outside project scope → revert via git, suspend hero
 - [ ] Hero attempts push to main → block (branch protection), suspend, notify
@@ -514,7 +514,7 @@
 ### Testing
 - [x] Rust unit tests untuk db layer, process manager, CLI parsing
 - [x] Python unit tests untuk guild_master, memory_manager, mcp_builder
-- [ ] Integration tests: goal → quest chain → hero assignment flow
+- [x] Integration tests: goal → quest chain → hero assignment flow
 - [ ] Test on both macOS dan Linux dari Phase 1
 
 ### Backup & Recovery
