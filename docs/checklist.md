@@ -41,7 +41,7 @@
 - [x] Table: `memories` (id, owner, project_id, category, content, tags, created_by, updated_at)
 - [x] Table: `activity_log` (id, timestamp, actor, action, quest_id, project_id, level)
 - [x] `log_activity()` helper function
-- [ ] CRUD functions untuk setiap table
+- [x] CRUD functions untuk setiap table
 - [x] Hourly auto-backup logic (`~/.guild/backups/guild-{timestamp}.db`, retain 24)
 
 ### 1.3 Filesystem Structure
@@ -79,7 +79,7 @@
 - [x] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
 - [x] Create project config summary: `workspace/projects/{name}/config.md`
 - [x] Insert project record ke `guild.db`
-- [ ] Scan TODOs/open issues — offer to create quests (optional)
+- [x] Scan TODOs/open issues — offer to create quests (optional)
 
 ### 1.6 CLI — `guild project` Subcommands
 - [x] `guild project list` — list semua registered projects
@@ -254,7 +254,7 @@
 - [x] Implementation complete → auto-create test quest (different hero)
 - [x] Test pass → auto-create review quest (third hero)
 - [x] Review approved → mark chain done
-- [ ] Review changes requested → create address-review quest → back to implementor
+- [x] Review changes requested → create address-review quest → back to implementor (done via fix quest flow)
 - [x] Chain rule enforcement: no hero holds two roles in same chain
 
 ### 3.5 Session Crash Recovery
@@ -413,8 +413,8 @@
 - [x] `/goal {text}` — post new goal
 - [x] `/cost` — today's usage breakdown
 - [x] `/help` — list commands
-- [ ] Natural language parsing (non-prefixed messages)
-- [ ] Ambiguous input (confidence <60%) → ask clarification, don't execute
+- [x] Natural language parsing (non-prefixed messages)
+- [x] Ambiguous input (confidence <60%) → ask clarification, don't execute
 
 ### 5.8 Telegram Outbound Notifications
 - [x] Level 1 (Silent): log only — routine assignments, minor decisions
@@ -493,7 +493,7 @@
 ### 6.6 Documentation & Launch
 - [x] README.md — project overview, installation, quickstart, CLI reference
 - [x] Contributing guide (if open source)
-- [ ] Show HN post draft
+- [x] Show HN post draft
 - [ ] Launch assets (screenshots, demo GIF)
 
 ---
