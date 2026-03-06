@@ -85,6 +85,16 @@ fn run_show() -> Result<()> {
 }
 
 fn run_set(key: String, value: String) -> Result<()> {
+    // Keys that are stored in the DB config table
+    let db_keys = ["cost-cap-daily"];
+
+    if db_keys.contains(&key.as_str()) {
+        let conn = db::open()?;
+        db::set_config(&conn, &key, &value)?;
+        println!("{} Config '{}' set to '{}'", "+".green(), key.cyan(), value);
+        return Ok(());
+    }
+
     let mut config = load_config()?;
 
     // Try to parse value as number or bool, fall back to string

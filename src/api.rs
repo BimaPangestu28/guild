@@ -27,6 +27,7 @@ pub fn serve(port: u16, dashboard_dir: Option<PathBuf>) -> Result<()> {
             (Method::Get, "/api/log") => handle_log(request),
             (Method::Get, "/api/locks") => handle_locks(request),
             (Method::Get, "/api/mcps") => handle_mcps(request),
+            (Method::Get, "/api/cost") => handle_cost(request),
 
             // Static files (dashboard)
             (Method::Get, path) => {
@@ -140,6 +141,9 @@ fn handle_status(request: tiny_http::Request) -> Result<()> {
         )
         .unwrap_or(0);
 
+    let (cost_today, _, _) = db::get_cost_today(&conn).unwrap_or((0.0, 0, 0));
+    let cost_cap = db::get_cost_daily_cap(&conn);
+
     let json = serde_json::json!({
         "heroes": {
             "total": hero_total,
@@ -154,7 +158,9 @@ fn handle_status(request: tiny_http::Request) -> Result<()> {
         },
         "projects": {
             "active": projects_active,
-        }
+        },
+        "costToday": cost_today,
+        "costCap": cost_cap,
     });
 
     respond_json(request, json)
@@ -369,6 +375,41 @@ fn handle_mcps(request: tiny_http::Request) -> Result<()> {
         .collect();
 
     respond_json(request, serde_json::json!(mcps))
+}
+
+fn handle_cost(request: tiny_http::Request) -> Result<()> {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(e) => return respond_error(request, 500, &format!("DB error: {}", e)),
+    };
+
+    let (cost_today, input_tokens, output_tokens) = db::get_cost_today(&conn).unwrap_or((0.0, 0, 0));
+    let cap = db::get_cost_daily_cap(&conn);
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    let by_actor = db::get_cost_by_actor(&conn, &today).unwrap_or_default();
+    let by_project = db::get_cost_by_project(&conn, &today).unwrap_or_default();
+
+    let by_actor_json: Vec<serde_json::Value> = by_actor
+        .into_iter()
+        .map(|(actor, cost)| serde_json::json!({"actor": actor, "cost": cost}))
+        .collect();
+
+    let by_project_json: Vec<serde_json::Value> = by_project
+        .into_iter()
+        .map(|(project, cost)| serde_json::json!({"project": project, "cost": cost}))
+        .collect();
+
+    let json = serde_json::json!({
+        "today": cost_today,
+        "cap": cap,
+        "byActor": by_actor_json,
+        "byProject": by_project_json,
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+    });
+
+    respond_json(request, json)
 }
 
 // ---------- Static File Serving ----------

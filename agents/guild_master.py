@@ -33,6 +33,108 @@ INBOX = GUILD_DIR / "workspace" / "inbox"
 OUTBOX = GUILD_DIR / "workspace" / "outbox"
 POLL_INTERVAL = 10  # seconds
 
+MAX_CONSECUTIVE_CRASHES = 3
+CRASH_WINDOW_SECONDS = 300  # 5 minutes
+
+
+# ---------------------------------------------------------------------------
+# Error handling levels
+# ---------------------------------------------------------------------------
+
+class GuildError:
+    FATAL = "fatal"
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+
+def _load_telegram_bot():
+    try:
+        from telegram_bot import TelegramBot
+        bot = TelegramBot()
+        if bot.token and bot.chat_id:
+            return bot
+    except Exception:
+        pass
+    return None
+
+
+def handle_error(level, message, context=None):
+    try:
+        conn = get_db()
+        log_activity(conn, "guild-master", f"[{level.upper()}] {message}")
+        conn.close()
+    except Exception:
+        print(f"  ! Could not log error: [{level.upper()}] {message}")
+
+    if level == GuildError.FATAL:
+        bot = _load_telegram_bot()
+        if bot:
+            bot.send_notification(4, f"FATAL: {message}")
+        pause_all_heroes()
+        raise SystemExit(f"FATAL: {message}")
+
+    elif level == GuildError.CRITICAL:
+        bot = _load_telegram_bot()
+        if bot:
+            bot.send_notification(4, f"CRITICAL: {message}")
+
+    elif level == GuildError.WARNING:
+        bot = _load_telegram_bot()
+        if bot:
+            bot.send_notification(3, f"WARNING: {message}")
+
+
+def pause_all_heroes():
+    try:
+        conn = get_db()
+        conn.execute("UPDATE heroes SET status = 'offline' WHERE status IN ('idle', 'on_quest')")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Safe DB wrapper with corruption detection
+# ---------------------------------------------------------------------------
+
+def safe_db_execute(conn, query, params=None, fetch=None):
+    try:
+        if params:
+            cursor = conn.execute(query, params)
+        else:
+            cursor = conn.execute(query)
+        if fetch == "one":
+            return cursor.fetchone()
+        elif fetch == "all":
+            return cursor.fetchall()
+        return cursor
+    except sqlite3.DatabaseError as e:
+        error_msg = str(e)
+        if "malformed" in error_msg or "corrupt" in error_msg or "disk" in error_msg:
+            _handle_db_corruption(error_msg)
+        raise
+
+
+def _handle_db_corruption(error_msg):
+    backup_dir = GUILD_DIR / "backups"
+    backups = sorted(backup_dir.glob("guild-*.db")) if backup_dir.exists() else []
+
+    if backups:
+        latest_backup = backups[-1]
+        try:
+            corrupt_path = DB_PATH.with_suffix(".db.corrupt")
+            if DB_PATH.exists():
+                shutil.move(str(DB_PATH), str(corrupt_path))
+            shutil.copy2(str(latest_backup), str(DB_PATH))
+            handle_error(GuildError.CRITICAL, f"DB corruption detected: {error_msg}. Restored from {latest_backup.name}")
+            return
+        except Exception as restore_err:
+            handle_error(GuildError.FATAL, f"DB corruption detected and restore failed: {restore_err}")
+    else:
+        handle_error(GuildError.FATAL, f"DB corruption detected: {error_msg}. No backups available for restore.")
+
 SYSTEM_PROMPT = """\
 You are the Guild Master, an AI orchestrator managing a team of developer heroes (Claude Code agents).
 
@@ -49,7 +151,7 @@ Quest tiers:
 - LEGENDARY: full subsystem (decompose into smaller quests)
 - BOSS: entire project phase (MUST decompose, never assign directly)
 
-Quest types: feature, bugfix, test, review, chore, refactor, docs
+Quest types: feature, bugfix, test, review, fix, chore, refactor, docs
 
 Rules:
 - Max 4 hours estimated work per quest
@@ -379,6 +481,10 @@ def call_guild_master(client, context):
     """Call Claude API for Guild Master decisions."""
     global _session_api_calls, _session_token_total
 
+    if not check_cost_cap():
+        print("  ! Skipping API call — daily cost cap exceeded")
+        return None
+
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4096,
@@ -386,16 +492,15 @@ def call_guild_master(client, context):
         messages=[{"role": "user", "content": context}],
     )
 
-    # Track cost
     _session_api_calls += 1
-    tokens_used = getattr(response.usage, "input_tokens", 0) + getattr(response.usage, "output_tokens", 0)
-    _session_token_total += tokens_used
+    input_tokens = getattr(response.usage, "input_tokens", 0)
+    output_tokens = getattr(response.usage, "output_tokens", 0)
+    _session_token_total += input_tokens + output_tokens
+    cost = (input_tokens * 3.0 / 1_000_000) + (output_tokens * 15.0 / 1_000_000)
     try:
-        conn = get_db()
-        log_cost(conn, "guild-master", tokens_used)
-        conn.close()
+        log_cost_to_db("guild-master", input_tokens, output_tokens, cost, "claude-sonnet-4-20250514")
     except Exception:
-        pass  # Don't let cost logging break the main flow
+        pass
 
     text = response.content[0].text
 
@@ -412,9 +517,55 @@ def call_guild_master(client, context):
         return None
 
 
-def log_cost(conn, actor, tokens, quest_id=None):
-    """Log estimated token usage to activity_log."""
-    log_activity(conn, actor, f"api_cost: {tokens} tokens", quest_id=quest_id)
+def log_cost_to_db(actor, input_tokens, output_tokens, cost, model="claude-sonnet-4-20250514", quest_id=None, project_id=None):
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute(
+        "INSERT INTO cost_log (id, actor, category, project_id, quest_id, input_tokens, output_tokens, cost_usd, model) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), actor, "guild_master", project_id, quest_id, input_tokens, output_tokens, cost, model),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_daily_cost():
+    conn = sqlite3.connect(str(DB_PATH))
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_log WHERE date(timestamp) = date('now')"
+    ).fetchone()
+    conn.close()
+    return row[0] if row else 0.0
+
+
+def get_cost_cap():
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        row = conn.execute("SELECT value FROM config WHERE key = 'cost-cap-daily'").fetchone()
+    except Exception:
+        conn.close()
+        return 10.0
+    conn.close()
+    if row:
+        try:
+            return float(row[0])
+        except (ValueError, TypeError):
+            pass
+    return 10.0
+
+
+def check_cost_cap():
+    daily_cost = get_daily_cost()
+    cap = get_cost_cap()
+    if daily_cost >= cap:
+        print(f"  !! COST CAP EXCEEDED: ${daily_cost:.2f} >= ${cap:.2f}")
+        conn = get_db()
+        log_activity(conn, "guild-master", f"Cost cap exceeded: ${daily_cost:.2f} >= ${cap:.2f}", level="critical")
+        conn.execute("UPDATE heroes SET status = 'paused' WHERE status IN ('idle', 'on_quest')")
+        conn.commit()
+        log_activity(conn, "guild-master", "All heroes paused due to cost cap", level="warning")
+        conn.close()
+        return False
+    return True
 
 
 def find_best_hero(conn, req_skills, exclude_hero_ids=None):
@@ -459,7 +610,9 @@ def find_best_hero(conn, req_skills, exclude_hero_ids=None):
 # Quest chain automation helpers
 # ---------------------------------------------------------------------------
 
-_CHAIN_SEQUENCE = {"feature": "test", "bugfix": "test", "test": "review", "refactor": "test"}
+_CHAIN_SEQUENCE = {"feature": "test", "bugfix": "test", "test": "review", "refactor": "test", "fix": "review"}
+
+MAX_REVIEW_CYCLES = 3
 
 
 def _get_chain_hero_ids(conn, chain_id):
@@ -471,13 +624,38 @@ def _get_chain_hero_ids(conn, chain_id):
     return {r["assigned_to"] for r in rows}
 
 
+def _get_review_cycle_count(conn, chain_id):
+    """Count how many review quests exist in a chain (indicates review cycles)."""
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM quests WHERE chain_id = ? AND type = 'review'",
+        (chain_id,),
+    ).fetchone()
+    return row["cnt"] if row else 0
+
+
+def _get_original_implementor(conn, chain_id):
+    """Find the hero assigned to the first quest in the chain (the original implementor)."""
+    row = conn.execute(
+        "SELECT assigned_to FROM quests WHERE chain_id = ? ORDER BY created_at ASC LIMIT 1",
+        (chain_id,),
+    ).fetchone()
+    if row and row["assigned_to"]:
+        return conn.execute("SELECT * FROM heroes WHERE id = ?", (row["assigned_to"],)).fetchone()
+    return None
+
+
 def _auto_create_next_quest(conn, completed_quest, client):
     """If the completed quest is part of a sequence, create the next quest in the chain."""
     quest_type = completed_quest["type"]
     next_type = _CHAIN_SEQUENCE.get(quest_type)
     if not next_type:
-        # review completed (or other terminal type) → mark chain done
+        # review completed (or other terminal type) → check for changes_requested or mark chain done
         if quest_type == "review":
+            changes_requested = _check_changes_requested(conn, completed_quest)
+            if changes_requested:
+                _create_fix_quest(conn, completed_quest)
+                return
+
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 "UPDATE quest_chains SET status = 'done', completed_at = ? WHERE id = ?",
@@ -486,6 +664,8 @@ def _auto_create_next_quest(conn, completed_quest, client):
             log_activity(conn, "guild-master", f"Chain {completed_quest['chain_id'][:8]} completed",
                          project_id=completed_quest["project_id"])
             print(f"  >> Chain {completed_quest['chain_id'][:8]} completed")
+
+            check_merge_ready(conn, completed_quest["chain_id"])
             conn.commit()
         return
 
@@ -539,6 +719,169 @@ def _auto_create_next_quest(conn, completed_quest, client):
         hero_inbox.write_text(brief)
         log_activity(conn, "guild-master", f"Assigned chain quest {quest_id} to {hero['name']}", quest_id=quest_id)
         print(f"  -> Assigned [{quest_id}] to {hero['name']}")
+
+    conn.commit()
+
+
+def _check_changes_requested(conn, review_quest):
+    """Check if a review quest resulted in changes_requested status."""
+    hero_name = None
+    if review_quest["assigned_to"]:
+        hero_row = conn.execute(
+            "SELECT name FROM heroes WHERE id = ?", (review_quest["assigned_to"],)
+        ).fetchone()
+        if hero_row:
+            hero_name = hero_row["name"]
+
+    if not hero_name:
+        return False
+
+    history_file = GUILD_DIR / "workspace" / "memory" / "heroes" / hero_name / "history.md"
+    if not history_file.exists():
+        return False
+
+    history = history_file.read_text()
+    quest_pattern = rf"## {re.escape(review_quest['id'])}.*?\n([\s\S]*?)(?=\n## |\Z)"
+    match = re.search(quest_pattern, history)
+    if match:
+        report_text = match.group(1).lower()
+        if "changes_requested" in report_text or "changes requested" in report_text:
+            return True
+
+    rows = conn.execute(
+        "SELECT action FROM activity_log WHERE quest_id = ? AND action LIKE '%changes_requested%'",
+        (review_quest["id"],),
+    ).fetchall()
+    return len(rows) > 0
+
+
+def _create_fix_quest(conn, review_quest):
+    """Create a fix quest after a review with changes_requested."""
+    chain_id = review_quest["chain_id"]
+
+    review_cycles = _get_review_cycle_count(conn, chain_id)
+    if review_cycles >= MAX_REVIEW_CYCLES:
+        log_activity(
+            conn, "guild-master",
+            f"ESCALATION: Chain {chain_id[:8]} hit {review_cycles} review cycles — requires developer intervention",
+            project_id=review_quest["project_id"], level="critical",
+        )
+        print(f"  !! ESCALATION: Chain {chain_id[:8]} exceeded max review cycles ({review_cycles})")
+        gm_outbox = OUTBOX / "guild-master.md"
+        escalation_msg = (
+            f"\n\n## ESCALATION — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"Chain {chain_id[:8]} has gone through {review_cycles} review cycles.\n"
+            f"Max review cycles ({MAX_REVIEW_CYCLES}) exceeded. Developer intervention required.\n"
+        )
+        existing = gm_outbox.read_text() if gm_outbox.exists() else ""
+        gm_outbox.write_text(existing + escalation_msg)
+        conn.commit()
+        return
+
+    original_implementor = _get_original_implementor(conn, chain_id)
+    original_title = review_quest["title"]
+    if original_title.startswith("[review] "):
+        original_title = original_title[len("[review] "):]
+    if original_title.startswith("[fix] "):
+        original_title = original_title[len("[fix] "):]
+
+    review_feedback = review_quest.get("result") or review_quest["description"]
+    quest_id = f"GLD-{uuid.uuid4().hex[:6].upper()}"
+    now = datetime.now(timezone.utc).isoformat()
+    title = f"Address review feedback: {original_title}"
+    description = (
+        f"Fix quest following changes_requested on review {review_quest['id']}.\n\n"
+        f"Original quest: {original_title}\n"
+        f"Branch: {review_quest['branch']}\n\n"
+        f"## Review Feedback\n{review_feedback}\n"
+    )
+    branch = f"fix/{quest_id[-6:]}-{review_quest['branch'].split('/')[-1] if '/' in review_quest['branch'] else review_quest['branch']}"
+
+    assigned_to = original_implementor["id"] if original_implementor else None
+
+    conn.execute(
+        "INSERT INTO quests (id, chain_id, parent_quest_id, title, description, tier, type, status, "
+        "project_id, branch, req_skills, assigned_to, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            quest_id, chain_id, review_quest["id"],
+            title, description,
+            review_quest["tier"], "fix",
+            "active" if assigned_to else "backlog",
+            review_quest["project_id"],
+            branch,
+            review_quest["req_skills"],
+            assigned_to,
+            now,
+        ),
+    )
+
+    log_activity(conn, "guild-master",
+                 f"Created fix quest {quest_id} in chain {chain_id[:8]} (review cycle {review_cycles + 1})",
+                 quest_id=quest_id, project_id=review_quest["project_id"])
+    print(f"  >> Created fix quest [{quest_id}] in chain {chain_id[:8]}")
+
+    if assigned_to and original_implementor:
+        conn.execute(
+            "UPDATE heroes SET status = 'on_quest', current_quest_id = ? WHERE id = ?",
+            (quest_id, assigned_to),
+        )
+        brief = f"## Quest: {title}\nID: {quest_id}\nBranch: {branch}\n"
+        brief += f"Tier: {review_quest['tier']} | Type: fix\n\n{description}\n"
+        hero_inbox = INBOX / f"{original_implementor['name']}.md"
+        hero_inbox.write_text(brief)
+        log_activity(conn, "guild-master",
+                     f"Assigned fix quest {quest_id} to {original_implementor['name']}",
+                     quest_id=quest_id)
+        print(f"  -> Assigned fix [{quest_id}] to {original_implementor['name']}")
+
+    conn.commit()
+
+
+def check_merge_ready(conn, chain_id):
+    """Check if all quests in a completed chain are done and notify for merge approval."""
+    chain = conn.execute(
+        "SELECT * FROM quest_chains WHERE id = ?", (chain_id,)
+    ).fetchone()
+    if not chain or chain["status"] != "done":
+        return
+
+    pending = conn.execute(
+        "SELECT COUNT(*) as cnt FROM quests WHERE chain_id = ? AND status NOT IN ('done')",
+        (chain_id,),
+    ).fetchone()
+    if pending and pending["cnt"] > 0:
+        return
+
+    already_pending = conn.execute(
+        "SELECT id FROM activity_log WHERE action LIKE ? AND action LIKE '%merge_pending%'",
+        (f"%{chain_id[:8]}%",),
+    ).fetchone()
+    if already_pending:
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO activity_log (id, timestamp, actor, action, quest_id, project_id, level) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            str(uuid.uuid4()), now, "guild-master",
+            f"merge_pending: Chain {chain_id[:8]} ready for dev->main merge",
+            None, chain["project_id"], "info",
+        ),
+    )
+
+    try:
+        bot = _load_telegram_bot()
+        if bot:
+            bot.send_message(
+                f"*Merge Ready*\n\n"
+                f"Chain `{chain_id[:8]}` is complete and ready for dev->main merge.\n"
+                f"Goal: _{chain['goal']}_\n\n"
+                f"Use `/approve {chain_id[:8]}` to create PR or `/reject {chain_id[:8]}` to keep on dev."
+            )
+    except Exception:
+        pass
 
     conn.commit()
 
@@ -715,7 +1058,7 @@ def run_cycle(client):
     # Quest chain automation: check for newly completed quests that are part of a chain
     completed_quests = conn.execute(
         "SELECT * FROM quests WHERE status = 'done' AND completed_at IS NOT NULL "
-        "AND chain_id IS NOT NULL AND type IN ('feature', 'bugfix', 'test', 'review', 'refactor')"
+        "AND chain_id IS NOT NULL AND type IN ('feature', 'bugfix', 'test', 'review', 'refactor', 'fix')"
     ).fetchall()
     for cq in completed_quests:
         # Only process if no successor quest already exists for this quest
@@ -781,20 +1124,45 @@ def main():
     log_activity(get_db(), "guild-master", "Guild Master started")
 
     last_backup = time.time()
+    crash_times = []
 
     try:
         while True:
             try:
                 run_cycle(client)
+                crash_times.clear()
+            except sqlite3.DatabaseError as e:
+                error_msg = str(e)
+                if "malformed" in error_msg or "corrupt" in error_msg or "disk" in error_msg:
+                    _handle_db_corruption(error_msg)
+                else:
+                    handle_error(GuildError.WARNING, f"Database error in cycle: {e}")
+            except SystemExit:
+                raise
+            except KeyboardInterrupt:
+                raise
             except Exception as e:
-                print(f"  ! Cycle error: {e}")
+                now = time.time()
+                crash_times.append(now)
+                crash_times = [t for t in crash_times if now - t <= CRASH_WINDOW_SECONDS]
+
+                if len(crash_times) >= MAX_CONSECUTIVE_CRASHES:
+                    handle_error(
+                        GuildError.FATAL,
+                        f"Guild Master crashed {len(crash_times)} times within {CRASH_WINDOW_SECONDS}s. Last error: {e}",
+                    )
+
+                handle_error(GuildError.WARNING, f"Cycle error: {e}")
+                print(f"  ! Recovering in 30s...")
+                time.sleep(30)
+                continue
 
             # Hourly auto-backup
             if time.time() - last_backup > 3600:
                 try:
                     db_backup()
                 except Exception as e:
-                    print(f"  ! Backup error: {e}")
+                    handle_error(GuildError.WARNING, f"Backup error: {e}")
                 last_backup = time.time()
 
             time.sleep(POLL_INTERVAL)

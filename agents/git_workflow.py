@@ -231,6 +231,37 @@ def create_pr(project_path, branch_name, base_branch, title, body, provider):
 
 
 # ---------------------------------------------------------------------------
+# 4b. create_merge_pr (dev -> main)
+# ---------------------------------------------------------------------------
+
+def create_merge_pr(project_path, dev_branch, main_branch, title, body):
+    """Create a PR from dev_branch to main_branch.
+
+    Detects the git provider from the project DB entry or falls back to
+    trying GitHub CLI then GitLab CLI.
+    Returns the PR/MR URL or None.
+    """
+    conn = get_db()
+    project = conn.execute(
+        "SELECT * FROM projects WHERE path = ?", (str(project_path),)
+    ).fetchone()
+    conn.close()
+
+    provider = None
+    if project and "git_provider" in project.keys():
+        provider = project["git_provider"]
+
+    if not provider:
+        owner, repo = get_repo_info(project_path)
+        if owner:
+            provider = "github"
+        else:
+            provider = "none"
+
+    return create_pr(project_path, dev_branch, main_branch, title, body, provider)
+
+
+# ---------------------------------------------------------------------------
 # 5. auto_create_quest_pr
 # ---------------------------------------------------------------------------
 

@@ -375,7 +375,8 @@ def cmd_goal(bot, text):
 
 
 def cmd_approve(bot, text):
-    """Handle /approve {chain_id} — mark chain for merge."""
+    """Handle /approve {chain_id} — approve chain and create dev->main PR."""
+    import uuid as _uuid
     chain_id = text.strip()
     if not chain_id:
         bot.send_message("Usage: `/approve <chain_id>`")
@@ -383,9 +384,8 @@ def cmd_approve(bot, text):
 
     conn = get_db()
 
-    # Try to find chain by prefix match
     row = conn.execute(
-        "SELECT id, goal, status FROM quest_chains WHERE id LIKE ?",
+        "SELECT qc.id, qc.goal, qc.status, qc.project_id FROM quest_chains qc WHERE qc.id LIKE ?",
         (f"{chain_id}%",),
     ).fetchone()
 
@@ -394,36 +394,99 @@ def cmd_approve(bot, text):
         bot.send_message(f"Chain `{chain_id}` not found.")
         return
 
-    if row["status"] == "done":
+    if row["status"] not in ("done", "approved"):
         conn.close()
-        bot.send_message(f"Chain `{row['id'][:8]}` is already completed.")
+        bot.send_message(f"Chain `{row['id'][:8]}` is not ready for merge (status: {row['status']}).")
         return
 
-    # Mark chain as approved/done
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         "UPDATE quest_chains SET status = 'approved', completed_at = ? WHERE id = ?",
         (now, row["id"]),
     )
 
-    # Log activity
     conn.execute(
         "INSERT INTO activity_log (id, timestamp, actor, action, quest_id, project_id, level) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (
-            str(__import__("uuid").uuid4()),
-            now,
-            "telegram-bot",
-            f"Chain {row['id'][:8]} approved for merge via Telegram",
-            None,
-            None,
-            "info",
-        ),
+        (str(_uuid.uuid4()), now, "telegram-bot",
+         f"Chain {row['id'][:8]} approved for merge via Telegram",
+         None, row["project_id"], "info"),
+    )
+    conn.commit()
+
+    pr_url = None
+    if row["project_id"]:
+        project = conn.execute(
+            "SELECT * FROM projects WHERE id = ?", (row["project_id"],)
+        ).fetchone()
+        if project:
+            try:
+                from git_workflow import create_merge_pr
+                pr_url = create_merge_pr(
+                    project["path"],
+                    "development",
+                    "main",
+                    f"Merge: {row['goal']}",
+                    f"Chain `{row['id'][:8]}` approved for merge.\n\nGoal: {row['goal']}",
+                )
+            except Exception as e:
+                bot.send_message(f"Chain approved but PR creation failed: {e}")
+
+    conn.execute(
+        "INSERT INTO activity_log (id, timestamp, actor, action, quest_id, project_id, level) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (str(_uuid.uuid4()), now, "telegram-bot",
+         f"merge_approved: Chain {row['id'][:8]} PR: {pr_url or 'manual'}",
+         None, row["project_id"], "info"),
     )
     conn.commit()
     conn.close()
 
-    bot.send_message(f"Chain `{row['id'][:8]}` approved for merge.\nGoal: _{row['goal']}_")
+    if pr_url:
+        bot.send_message(f"Chain `{row['id'][:8]}` approved.\nPR created: {pr_url}\nGoal: _{row['goal']}_")
+    else:
+        bot.send_message(f"Chain `{row['id'][:8]}` approved for merge.\nGoal: _{row['goal']}_")
+
+
+def cmd_reject(bot, text):
+    """Handle /reject {chain_id} — reject merge, keep chain on development."""
+    import uuid as _uuid
+    parts = text.strip().split(None, 1)
+    chain_id = parts[0] if parts else ""
+    reason = parts[1] if len(parts) > 1 else "No reason provided"
+
+    if not chain_id:
+        bot.send_message("Usage: `/reject <chain_id> [reason]`")
+        return
+
+    conn = get_db()
+
+    row = conn.execute(
+        "SELECT id, goal, status, project_id FROM quest_chains WHERE id LIKE ?",
+        (f"{chain_id}%",),
+    ).fetchone()
+
+    if not row:
+        conn.close()
+        bot.send_message(f"Chain `{chain_id}` not found.")
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO activity_log (id, timestamp, actor, action, quest_id, project_id, level) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (str(_uuid.uuid4()), now, "telegram-bot",
+         f"merge_rejected: Chain {row['id'][:8]} — {reason}",
+         None, row["project_id"], "info"),
+    )
+    conn.commit()
+    conn.close()
+
+    bot.send_message(
+        f"Chain `{row['id'][:8]}` merge rejected.\n"
+        f"Reason: _{reason}_\n"
+        f"Chain remains on development."
+    )
 
 
 def cmd_cost(bot):
@@ -472,7 +535,8 @@ def cmd_help(bot):
         "/pause — Set all heroes to offline\n"
         "/resume — Set all heroes to idle\n"
         "/goal `<text>` — Submit goal to Guild Master\n"
-        "/approve `<chain_id>` — Approve chain for merge\n"
+        "/approve `<chain_id>` — Approve chain and create dev->main PR\n"
+        "/reject `<chain_id> [reason]` — Reject merge, keep on dev\n"
         "/cost — Today's API cost breakdown\n"
         "/help — Show this help message"
     )
@@ -492,6 +556,7 @@ COMMANDS = {
     "/resume": lambda bot, _: cmd_resume(bot),
     "/goal": lambda bot, args: cmd_goal(bot, args),
     "/approve": lambda bot, args: cmd_approve(bot, args),
+    "/reject": lambda bot, args: cmd_reject(bot, args),
     "/cost": lambda bot, _: cmd_cost(bot),
     "/help": lambda bot, _: cmd_help(bot),
 }

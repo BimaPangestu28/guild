@@ -165,7 +165,7 @@ fn save_secrets(secrets: &Map<String, Value>) -> Result<()> {
 
 // ---------- Command handlers ----------
 
-fn run_add(name: String, value: String) -> Result<()> {
+pub fn run_add(name: String, value: String) -> Result<()> {
     let key = get_key();
     let encrypted = encrypt(&value, &key);
 

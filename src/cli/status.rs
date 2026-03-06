@@ -113,7 +113,78 @@ pub fn run_report() -> Result<()> {
 }
 
 pub fn run_cost() -> Result<()> {
+    let conn = db::open()?;
+
+    let (total_cost, total_input, total_output) = db::get_cost_today(&conn)?;
+    let cap = db::get_cost_daily_cap(&conn);
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let by_actor = db::get_cost_by_actor(&conn, &today)?;
+    let by_project = db::get_cost_by_project(&conn, &today)?;
+
     println!("{}", "COST TRACKING".yellow().bold());
-    println!("{}", "Cost tracking will be available with Claude Code SDK integration.".dimmed());
+    println!("{}", "─".repeat(50));
+
+    let pct = if cap > 0.0 { (total_cost / cap) * 100.0 } else { 0.0 };
+    let cost_str = format!("${:.2} / ${:.2} ({:.0}%)", total_cost, cap, pct);
+    let cost_colored = if pct > 80.0 {
+        cost_str.red()
+    } else if pct > 60.0 {
+        cost_str.yellow()
+    } else {
+        cost_str.green()
+    };
+    println!("  Today: {}", cost_colored);
+
+    // Progress bar
+    let bar_width = 30;
+    let filled = ((pct / 100.0) * bar_width as f64).min(bar_width as f64) as usize;
+    let empty = bar_width - filled;
+    let bar = format!("[{}{}]", "#".repeat(filled), "-".repeat(empty));
+    let bar_colored = if pct > 80.0 {
+        bar.red()
+    } else if pct > 60.0 {
+        bar.yellow()
+    } else {
+        bar.green()
+    };
+    println!("  {}", bar_colored);
+
+    println!(
+        "  Tokens: {} input / {} output",
+        format_tokens(total_input),
+        format_tokens(total_output),
+    );
+    println!();
+
+    if !by_actor.is_empty() {
+        println!("  {}", "BY ACTOR".yellow());
+        for (actor, cost) in &by_actor {
+            println!("    {:<20} ${:.4}", actor.cyan(), cost);
+        }
+        println!();
+    }
+
+    if !by_project.is_empty() {
+        println!("  {}", "BY PROJECT".yellow());
+        for (project, cost) in &by_project {
+            println!("    {:<20} ${:.4}", project.cyan(), cost);
+        }
+        println!();
+    }
+
+    if by_actor.is_empty() && by_project.is_empty() {
+        println!("  {}", "No cost data recorded today.".dimmed());
+    }
+
     Ok(())
+}
+
+fn format_tokens(tokens: i64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}K", tokens as f64 / 1_000.0)
+    } else {
+        tokens.to_string()
+    }
 }

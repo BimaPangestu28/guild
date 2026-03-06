@@ -157,6 +157,25 @@ fn create_tables(conn: &Connection) -> Result<()> {
             project_id      TEXT,
             level           TEXT NOT NULL DEFAULT 'info'
         );
+
+        CREATE TABLE IF NOT EXISTS cost_log (
+            id              TEXT PRIMARY KEY,
+            timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
+            actor           TEXT NOT NULL,
+            category        TEXT NOT NULL,
+            project_id      TEXT,
+            quest_id        TEXT,
+            input_tokens    INTEGER NOT NULL DEFAULT 0,
+            output_tokens   INTEGER NOT NULL DEFAULT 0,
+            cost_usd        REAL NOT NULL DEFAULT 0.0,
+            model           TEXT,
+            note            TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS config (
+            key             TEXT PRIMARY KEY,
+            value           TEXT NOT NULL
+        );
         ",
     )?;
     Ok(())
@@ -296,6 +315,88 @@ pub fn log_activity(
     Ok(())
 }
 
+pub fn get_config(conn: &Connection, key: &str) -> Result<Option<String>> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM config WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .ok();
+    Ok(result)
+}
+
+pub fn set_config(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)",
+        rusqlite::params![key, value],
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn log_cost(
+    conn: &Connection,
+    actor: &str,
+    category: &str,
+    project_id: Option<&str>,
+    quest_id: Option<&str>,
+    input_tokens: i64,
+    output_tokens: i64,
+    cost_usd: f64,
+    model: Option<&str>,
+    note: Option<&str>,
+) -> Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO cost_log (id, actor, category, project_id, quest_id, input_tokens, output_tokens, cost_usd, model, note) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![id, actor, category, project_id, quest_id, input_tokens, output_tokens, cost_usd, model, note],
+    )?;
+    Ok(())
+}
+
+pub fn get_cost_today(conn: &Connection) -> Result<(f64, i64, i64)> {
+    let row = conn.query_row(
+        "SELECT COALESCE(SUM(cost_usd), 0.0), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0) \
+         FROM cost_log WHERE date(timestamp) = date('now')",
+        [],
+        |row| Ok((row.get::<_, f64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+    )?;
+    Ok(row)
+}
+
+pub fn get_cost_by_actor(conn: &Connection, date: &str) -> Result<Vec<(String, f64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT actor, COALESCE(SUM(cost_usd), 0.0) FROM cost_log WHERE date(timestamp) = ?1 GROUP BY actor ORDER BY SUM(cost_usd) DESC",
+    )?;
+    let rows = stmt.query_map([date], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
+pub fn get_cost_by_project(conn: &Connection, date: &str) -> Result<Vec<(String, f64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(p.name, 'unknown'), COALESCE(SUM(c.cost_usd), 0.0) \
+         FROM cost_log c LEFT JOIN projects p ON c.project_id = p.id \
+         WHERE date(c.timestamp) = ?1 AND c.project_id IS NOT NULL \
+         GROUP BY c.project_id ORDER BY SUM(c.cost_usd) DESC",
+    )?;
+    let rows = stmt.query_map([date], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
+pub fn get_cost_daily_cap(conn: &Connection) -> f64 {
+    get_config(conn, "cost-cap-daily")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(10.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,6 +427,8 @@ mod tests {
         assert!(tables.contains(&"file_locks".to_string()));
         assert!(tables.contains(&"memories".to_string()));
         assert!(tables.contains(&"mcp_servers".to_string()));
+        assert!(tables.contains(&"cost_log".to_string()));
+        assert!(tables.contains(&"config".to_string()));
     }
 
     #[test]
