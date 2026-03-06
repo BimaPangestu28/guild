@@ -1271,6 +1271,41 @@ def _cycle_watchdog(timeout=CYCLE_TIMEOUT):
 # Proactive checks
 # ---------------------------------------------------------------------------
 
+def check_code_push(conn):
+    """Check recently completed quests for code quality indicators."""
+    recent = conn.execute(
+        "SELECT q.*, p.path, p.name as project_name FROM quests q "
+        "JOIN projects p ON q.project_id = p.id "
+        "WHERE q.status = 'done' AND q.completed_at > datetime('now', '-5 minutes')"
+    ).fetchall()
+
+    for quest in recent:
+        if not quest["path"] or not os.path.isdir(quest["path"]):
+            continue
+
+        try:
+            result = subprocess.run(
+                ["git", "-C", quest["path"], "diff", "--unified=0",
+                 f"{quest['branch']}~5..{quest['branch']}", "--", "*.py", "*.rs", "*.ts", "*.tsx", "*.js"],
+                capture_output=True, text=True, timeout=30
+            )
+
+            added_todos = 0
+            for line in result.stdout.split('\n'):
+                if line.startswith('+') and not line.startswith('+++'):
+                    if 'TODO' in line or 'FIXME' in line or 'HACK' in line:
+                        added_todos += 1
+
+            if added_todos > 3:
+                log_activity(conn, "guild-master",
+                    f"Code push check: {added_todos} new TODO/FIXME in {quest['project_name']} ({quest['id']})",
+                    quest_id=quest["id"], project_id=quest["project_id"])
+        except Exception:
+            pass
+
+    conn.commit()
+
+
 def check_idle_prs(conn):
     """Check for review quests that have been active > 24 hours."""
     threshold = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -1459,6 +1494,7 @@ def run_cycle(client):
     _handle_blocked_quests(conn, client)
 
     # Proactive checks
+    check_code_push(conn)
     check_idle_prs(conn)
     check_project_health(conn)
 

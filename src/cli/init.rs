@@ -189,6 +189,38 @@ fn prompt_first_hero() -> Result<bool> {
     Ok(true)
 }
 
+fn prompt_license_key() -> Result<()> {
+    let activate = Confirm::new()
+        .with_prompt("Enter a license key? (Free tier: 2 heroes, skip for free)")
+        .default(false)
+        .interact()?;
+
+    if activate {
+        let key: String = Input::new()
+            .with_prompt("License key")
+            .interact_text()?;
+
+        crate::license::activate(&key)?;
+    } else {
+        println!("  {} Using Free tier (2 heroes max)", "->".dimmed());
+    }
+
+    Ok(())
+}
+
+fn prompt_first_project() -> Result<()> {
+    let add_project = Confirm::new()
+        .with_prompt("Register your first project?")
+        .default(false)
+        .interact()?;
+
+    if add_project {
+        super::project::run_add(None, None, None, None, None)?;
+    }
+
+    Ok(())
+}
+
 pub fn run(project: Option<String>) -> Result<()> {
     let guild_dir = db::guild_dir();
     let first_init = !guild_dir.exists();
@@ -285,6 +317,12 @@ pub fn run(project: Option<String>) -> Result<()> {
         if hero_recruited {
             println!();
         }
+
+        prompt_license_key()?;
+        println!();
+
+        prompt_first_project()?;
+        println!();
 
         let license = crate::license::License::load();
         println!("{}", "Getting Started:".yellow().bold());

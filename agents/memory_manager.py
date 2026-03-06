@@ -91,6 +91,35 @@ def read_skill_file(hero_name, skill_name):
     return path.read_text()
 
 
+def get_group_shared_memory(conn, project_name):
+    """Get shared memory from all projects in the same group."""
+    groups = conn.execute(
+        "SELECT g.name, g.id FROM project_groups g "
+        "JOIN project_group_members m ON g.id = m.group_id "
+        "JOIN projects p ON m.project_id = p.id "
+        "WHERE p.name = ?",
+        (project_name,)
+    ).fetchall()
+
+    memory_parts = []
+    for group in groups:
+        members = conn.execute(
+            "SELECT p.name FROM projects p "
+            "JOIN project_group_members m ON p.id = m.project_id "
+            "WHERE m.group_id = ? AND p.name != ?",
+            (group["id"], project_name)
+        ).fetchall()
+
+        for member in members:
+            mem_file = GUILD_DIR / "workspace" / "memory" / "shared" / "projects" / f"{member['name']}.md"
+            if mem_file.exists():
+                content = mem_file.read_text()
+                if content.strip():
+                    memory_parts.append(f"## Related Project: {member['name']}\n{content}\n")
+
+    return "\n".join(memory_parts)
+
+
 def read_conventions():
     """Read all convention files from shared conventions directory."""
     if not CONVENTIONS_DIR.exists():

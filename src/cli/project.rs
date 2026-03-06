@@ -119,7 +119,7 @@ pub fn run(cmd: ProjectCommand) -> Result<()> {
     }
 }
 
-fn run_add(
+pub(crate) fn run_add(
     path: Option<String>,
     name: Option<String>,
     provider: Option<String>,
@@ -216,6 +216,16 @@ fn run_add(
     }
     println!("  Path: {}", project_path.display());
     println!("  Branches: {} → {}", main_b, dev_b);
+
+    let _ = write_project_config(
+        &guild_dir,
+        &project_name,
+        &project_path.to_string_lossy(),
+        &prov,
+        &main_b,
+        &dev_b,
+        language.as_deref().unwrap_or("unknown"),
+    );
 
     let _ = scan_conventions(
         &project_path.to_string_lossy(),
@@ -994,6 +1004,39 @@ fn run_group_remove(name: String) -> Result<()> {
     )?;
     conn.execute("DELETE FROM project_groups WHERE id = ?1", [&group_id])?;
     println!("{} Removed group '{}'", "-".red(), name.cyan());
+    Ok(())
+}
+
+fn write_project_config(
+    guild_dir: &std::path::Path,
+    name: &str,
+    path: &str,
+    provider: &str,
+    main_branch: &str,
+    dev_branch: &str,
+    language: &str,
+) -> Result<()> {
+    let config_dir = guild_dir.join("workspace/projects").join(name);
+    std::fs::create_dir_all(&config_dir)?;
+
+    let content = format!(
+        "# {} Configuration\n\n\
+        Path: {}\n\
+        Provider: {}\n\
+        Main branch: {}\n\
+        Dev branch: {}\n\
+        Language: {}\n\
+        Registered: {}\n",
+        name,
+        path,
+        provider,
+        main_branch,
+        dev_branch,
+        language,
+        chrono::Utc::now().format("%Y-%m-%d")
+    );
+
+    std::fs::write(config_dir.join("config.md"), content)?;
     Ok(())
 }
 

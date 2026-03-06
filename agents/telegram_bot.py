@@ -47,6 +47,17 @@ MAX_CONTEXT_MESSAGES = 10
 # Telegram Bot Class
 # ---------------------------------------------------------------------------
 
+DEFAULT_EVENT_LEVELS = {
+    "quest_complete": 3,
+    "level_up": 3,
+    "cost_warning": 4,
+    "escalation": 4,
+    "merge_ready": 3,
+    "crash": 3,
+    "daily_briefing": 3,
+}
+
+
 class TelegramBot:
     """Telegram Bot API client using urllib (stdlib only)."""
 
@@ -67,6 +78,8 @@ class TelegramBot:
             self.notification_level = int(tg.get("notification_level", 3))
 
         self.api_base = TELEGRAM_API.format(token=self.token)
+        self.db_path = str(DB_PATH)
+        self.min_level = self.notification_level
         self.context = self._load_context()
 
     def _load_context(self):
@@ -95,6 +108,26 @@ class TelegramBot:
         })
         self.context["messages"] = self.context["messages"][-MAX_CONTEXT_MESSAGES:]
         self._save_context()
+
+    def _get_event_level(self, event_name):
+        """Get notification level for an event, checking config overrides."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            row = conn.execute(
+                "SELECT value FROM config WHERE key = ?",
+                (f"notify-level-{event_name}",)
+            ).fetchone()
+            conn.close()
+            if row:
+                return int(row[0])
+        except Exception:
+            pass
+        return DEFAULT_EVENT_LEVELS.get(event_name, 3)
+
+    def _should_notify(self, event_name):
+        """Check if event should trigger a notification based on configured threshold."""
+        event_level = self._get_event_level(event_name)
+        return event_level >= self.min_level
 
     def _log_notification(self, text, level=2):
         """Log notification to JSONL for dashboard visibility."""
@@ -233,33 +266,42 @@ class TelegramBot:
 
     def notify_quest_complete(self, quest_id, quest_title, hero_name, chain_id=None):
         """Send a formatted quest completion notification."""
+        self._log_notification(f"Quest complete: {quest_title} by {hero_name}", level=3)
+        if not self._should_notify("quest_complete"):
+            return
         msg = "\u2705 *Quest Complete*\n\n"
         msg += f"Quest: `{quest_id}` \u2014 {quest_title}\n"
         msg += f"Hero: {hero_name}\n"
         if chain_id:
             msg += f"Chain: `{chain_id[:8]}`\n"
-        self._log_notification(f"Quest complete: {quest_title} by {hero_name}", level=3)
         self.send_message(msg)
 
     def notify_level_up(self, hero_name, hero_class, new_level):
         """Send a formatted hero level-up notification."""
+        self._log_notification(f"Level up: {hero_name} -> Level {new_level}", level=3)
+        if not self._should_notify("level_up"):
+            return
         msg = "\u2b06\ufe0f *Level Up!*\n\n"
         msg += f"{hero_name} ({hero_class}) reached *Level {new_level}*!"
-        self._log_notification(f"Level up: {hero_name} -> Level {new_level}", level=3)
         self.send_message(msg)
 
     def notify_cost_warning(self, current_cost, cap, percentage):
         """Send a formatted cost warning notification."""
+        self._log_notification(f"Cost warning: ${current_cost:.2f}/${cap:.2f} ({percentage:.0f}%)", level=4)
+        if not self._should_notify("cost_warning"):
+            return
         emoji = "\U0001f534" if percentage > 90 else "\U0001f7e1"
         msg = f"{emoji} *Cost Warning*\n\n"
         msg += f"Today: ${current_cost:.2f} / ${cap:.2f} ({percentage:.0f}%)\n"
         if percentage >= 100:
             msg += "\u26a0\ufe0f All heroes paused \u2014 daily cap reached."
-        self._log_notification(f"Cost warning: ${current_cost:.2f}/${cap:.2f} ({percentage:.0f}%)", level=4)
         self.send_message(msg)
 
     def notify_escalation(self, quest_id, problem, options=None):
         """Send a formatted escalation notification with optional A/B choices."""
+        self._log_notification(f"Escalation: {quest_id} -- {problem}", level=4)
+        if not self._should_notify("escalation"):
+            return
         msg = "\U0001f6a8 *Escalation Required*\n\n"
         msg += f"Quest: `{quest_id}`\n"
         msg += f"Problem: {problem}\n"
@@ -268,17 +310,18 @@ class TelegramBot:
             for i, opt in enumerate(options):
                 msg += f"  {chr(65+i)}) {opt}\n"
             msg += f"\nReply with your choice."
-        self._log_notification(f"Escalation: {quest_id} — {problem}", level=4)
         self.send_message(msg)
 
     def notify_merge_ready(self, chain_id, goal, project_name):
         """Send a formatted merge-ready notification."""
+        self._log_notification(f"Merge ready: {project_name} -- {goal}", level=3)
+        if not self._should_notify("merge_ready"):
+            return
         msg = "\U0001f500 *Merge Ready*\n\n"
         msg += f"Chain: `{chain_id[:8]}`\n"
         msg += f"Project: {project_name}\n"
         msg += f"Goal: _{goal}_\n\n"
         msg += f"Use `/approve {chain_id[:8]}` or `/reject {chain_id[:8]}`"
-        self._log_notification(f"Merge ready: {project_name} — {goal}", level=3)
         self.send_message(msg)
 
     @staticmethod
