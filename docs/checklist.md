@@ -73,7 +73,7 @@
 - [x] Interactive mode (wizard) kalau tanpa flags
 - [x] Validate path exists dan is a git repo
 - [x] Detect primary language dari file extensions
-- [ ] Read existing conventions (.editorconfig, .eslintrc, etc.) ke shared memory
+- [x] Read existing conventions (.editorconfig, .eslintrc, etc.) ke shared memory
 - [x] Check `dev_branch` exists — create from main kalau belum ada
 - [x] Create shared memory template: `workspace/memory/shared/projects/{name}.md`
 - [x] Create ADR folder: `workspace/memory/shared/projects/{name}-adr/`
@@ -84,7 +84,7 @@
 ### 1.6 CLI — `guild project` Subcommands
 - [x] `guild project list` — list semua registered projects
 - [x] `guild project show {name}` — detail project + config
-- [ ] `guild project edit {name}` — interactive edit
+- [x] `guild project edit {name}` — interactive edit
 - [x] `guild project pause {name}` — set status=paused, block new quests
 - [x] `guild project resume {name}` — set status=active
 - [x] `guild project archive {name}` — set status=archived, block active quests
@@ -113,7 +113,7 @@
 - [x] Accept goal string: `guild goal "description"`
 - [x] Accept `--project {name}` flag untuk scoping
 - [x] Write goal ke `workspace/inbox/guild-master.md`
-- [ ] Trigger Guild Master cycle (or print message kalau GM belum running)
+- [x] Trigger Guild Master cycle (or print message kalau GM belum running)
 
 ### 1.10 CLI — `guild status`, `guild log`, `guild report`
 - [x] `guild status` — full overview: heroes, active quests, backlog count, projects
@@ -149,7 +149,7 @@
 - [x] `guild hero {name} --start` generates Claude Code session command
 - [x] Command includes path ke assembled `CLAUDE.md`
 - [x] Command printed ke terminal
-- [ ] Copied to clipboard
+- [x] Copied to clipboard
 - [x] Hero picks up quest dari `workspace/inbox/{name}.md`
 
 ---
@@ -201,7 +201,7 @@
 - [x] `guild skill show {hero} {skill}` — skill detail
 - [x] `guild skill add {hero} {skill}` — manual skill add (type=manual)
 - [x] `guild skill remove {hero} {skill}`
-- [ ] `guild skill edit {hero} {skill}` — open in $EDITOR
+- [x] `guild skill edit {hero} {skill}` — open in $EDITOR
 - [x] `guild skill transfer {from_hero} {to_hero} {skill}` — copy skill backing file
 - [x] Skill backing files: create `workspace/memory/heroes/{name}/skills/{skill}.md`
 
@@ -263,7 +263,7 @@
 - [x] Check: recent commits exist? → re-spawn with recovery context block
 - [x] Check: no commits? → reset quest to backlog
 - [x] Recovery CLAUDE.md block: last known action, last commit, quest status
-- [ ] Notify developer via Telegram Level 3 kalau quest was active
+- [x] Notify developer via Telegram Level 3 kalau quest was active
 
 ### 3.6 Rate Limit Handling
 - [x] Detect no output > 5 minutes
@@ -334,10 +334,10 @@
 - [x] On reject: keep on development, log reason
 
 ### 4.6 Multi-Repo Project Groups
-- [ ] `guild project group create {name}`
-- [ ] `guild project group add {name} {path}`
-- [ ] `guild project group list`
-- [ ] `guild project group show {name}`
+- [x] `guild project group create {name}`
+- [x] `guild project group add {name} {path}`
+- [x] `guild project group list`
+- [x] `guild project group show {name}`
 - [ ] Cross-repo quest chains: each repo gets own branch/PR, linked under one chain ID
 - [ ] Shared memory across repos in group
 
@@ -379,9 +379,9 @@
 - [x] `guild mcp detach {hero} {mcp}`
 - [x] `guild mcp attach --project {name} {mcp}` — project default
 - [x] `guild mcp detach --project {name} {mcp}`
-- [ ] `guild project mcp add {project} {mcp}` (alias)
-- [ ] `guild project mcp remove {project} {mcp}` (alias)
-- [ ] `guild project mcp list {project}` (alias)
+- [x] `guild project mcp add {project} {mcp}` (alias)
+- [x] `guild project mcp remove {project} {mcp}` (alias)
+- [x] `guild project mcp list {project}` (alias)
 
 ### 5.4 MCP Failure Handling
 - [x] Required MCP unreachable → check via health check
@@ -484,7 +484,7 @@
 
 ### 6.5 Onboarding Polish
 - [x] Rookie mode flag in config.json (set on first init)
-- [ ] "Why I did this" explanations on every autonomous action during rookie
+- [x] "Why I did this" explanations on every autonomous action during rookie
 - [x] Getting started tips printed on first init
 - [x] `guild config skip-rookie` to disable
 - [x] `guild config show/set` for all configuration
