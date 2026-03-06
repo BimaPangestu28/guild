@@ -366,28 +366,61 @@ fn run_start(hero_id: &str, hero_name: &str, hero_class: &str, conn: &rusqlite::
     println!("Run this in a new terminal:");
     println!();
 
-    if let Some((_, _, _, _, project_id)) = &current_quest {
+    let session_cmd = if let Some((_, _, _, _, project_id)) = &current_quest {
         if let Ok(project_path) = conn.query_row(
             "SELECT path FROM projects WHERE id = ?1 OR name = ?1",
             [project_id.as_str()],
             |row| row.get::<_, String>(0),
         ) {
-            println!("  {}", format!(
+            format!(
                 "cd {} && claude --resume --claude-md {}",
                 project_path,
                 claude_md_path.display()
-            ).cyan());
+            )
         } else {
-            println!("  {}", format!(
+            format!(
                 "claude --resume --claude-md {}",
                 claude_md_path.display()
-            ).cyan());
+            )
         }
     } else {
-        println!("  {}", format!(
+        format!(
             "claude --resume --claude-md {}",
             claude_md_path.display()
-        ).cyan());
+        )
+    };
+
+    println!("  {}", session_cmd.cyan());
+
+    // Try to copy to clipboard (best effort)
+    if let Ok(mut child) = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = std::io::Write::write_all(stdin, session_cmd.as_bytes());
+        }
+        let _ = child.wait();
+        println!("{}", "  (Copied to clipboard)".dimmed());
+    } else if let Ok(mut child) = std::process::Command::new("xclip")
+        .args(["-selection", "clipboard"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = std::io::Write::write_all(stdin, session_cmd.as_bytes());
+        }
+        let _ = child.wait();
+        println!("{}", "  (Copied to clipboard)".dimmed());
+    } else if let Ok(mut child) = std::process::Command::new("wl-copy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = std::io::Write::write_all(stdin, session_cmd.as_bytes());
+        }
+        let _ = child.wait();
+        println!("{}", "  (Copied to clipboard)".dimmed());
     }
 
     println!();

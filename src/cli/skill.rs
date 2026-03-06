@@ -42,6 +42,13 @@ pub enum SkillCommand {
         /// Skill name
         skill: String,
     },
+    /// Edit a skill file in $EDITOR
+    Edit {
+        /// Hero name
+        hero: String,
+        /// Skill name
+        skill: String,
+    },
 }
 
 pub fn run(cmd: SkillCommand) -> Result<()> {
@@ -51,6 +58,7 @@ pub fn run(cmd: SkillCommand) -> Result<()> {
         SkillCommand::Add { hero, skill } => run_add(hero, skill),
         SkillCommand::Remove { hero, skill } => run_remove(hero, skill),
         SkillCommand::Transfer { from_hero, to_hero, skill } => run_transfer(from_hero, to_hero, skill),
+        SkillCommand::Edit { hero, skill } => run_edit(hero, skill),
     }
 }
 
@@ -234,6 +242,32 @@ fn run_remove(hero: String, skill: String) -> Result<()> {
 
     println!("{} Skill '{}' removed from hero '{}'", "✓".green(), skill.bold(), hero_name.cyan());
 
+    Ok(())
+}
+
+fn run_edit(hero: String, skill: String) -> Result<()> {
+    let guild_dir = db::guild_dir();
+    let skill_path = guild_dir
+        .join("workspace/memory/heroes")
+        .join(&hero)
+        .join("skills")
+        .join(format!("{}.md", skill));
+
+    if !skill_path.exists() {
+        bail!("Skill file not found: {}", skill_path.display());
+    }
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    std::process::Command::new(&editor)
+        .arg(&skill_path)
+        .status()?;
+
+    println!(
+        "{} Skill '{}' updated for hero '{}'",
+        "✓".green(),
+        skill.cyan(),
+        hero
+    );
     Ok(())
 }
 

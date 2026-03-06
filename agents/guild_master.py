@@ -61,6 +61,24 @@ def _load_telegram_bot():
     return None
 
 
+def _is_rookie_mode():
+    """Check if rookie mode is enabled in config."""
+    config_path = GUILD_DIR / "config.json"
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+            return config.get("rookie_mode", False)
+        except Exception:
+            pass
+    return False
+
+
+def _explain_action(action_description, reason):
+    """In rookie mode, print explanation of autonomous actions."""
+    if _is_rookie_mode():
+        print(f"  \U0001f4a1 WHY: {reason}")
+
+
 def handle_error(level, message, context=None):
     try:
         conn = get_db()
@@ -352,6 +370,7 @@ def process_actions(conn, response_data):
             current_chain_id = chain_id
             log_activity(conn, "guild-master", f"Created quest chain: {action.get('goal', '')}", project_id=project_id)
             print(f"  + Chain: {action.get('goal', '')}")
+            _explain_action("Decomposed goal", "Breaking complex goals into smaller quests ensures each piece is testable and reviewable independently.")
 
         elif action_type == "create_quest":
             chain_id = action.get("chain_id") or current_chain_id
@@ -421,6 +440,12 @@ def process_actions(conn, response_data):
 
             log_activity(conn, "guild-master", f"Assigned quest {quest_id} to {hero_name}", quest_id=quest_id)
             print(f"  → Assigned [{quest_id}] to {hero_name}")
+            req_skills = json.dumps(action.get("req_skills", []))
+            hero_skills_row = conn.execute(
+                "SELECT GROUP_CONCAT(name, ', ') FROM hero_skills WHERE hero_id = ?", (hero_id,)
+            ).fetchone()
+            hero_skills_str = hero_skills_row[0] if hero_skills_row and hero_skills_row[0] else "general"
+            _explain_action("Assigned quest", f"Chose {hero_name} because their skills ({hero_skills_str}) best match the quest requirements ({req_skills}).")
 
     conn.commit()
 
@@ -743,6 +768,7 @@ def _auto_create_next_quest(conn, completed_quest, client):
                      f"Chain {completed_quest['chain_id'][:8]} completed (COMMON tier, skipped test/review)",
                      project_id=completed_quest["project_id"])
         print(f"  >> Chain {completed_quest['chain_id'][:8]} completed (COMMON, skipped test/review)")
+        _explain_action("Skipped test/review", "COMMON tier quests are low-risk and don't need the full chain.")
         check_merge_ready(conn, completed_quest["chain_id"])
         conn.commit()
         return
@@ -806,6 +832,10 @@ def _auto_create_next_quest(conn, completed_quest, client):
                  f"Auto-created {next_type} quest {quest_id} in chain {chain_id[:8]}",
                  quest_id=quest_id, project_id=completed_quest["project_id"])
     print(f"  >> Auto-created [{quest_id}] {next_type} quest in chain {chain_id[:8]}")
+    if next_type == "test":
+        _explain_action("Created test quest", "A different hero tests the implementation to catch bugs the implementor might miss.")
+    elif next_type == "review":
+        _explain_action("Created review quest", "Code review by a third hero ensures quality and knowledge sharing.")
 
     if hero:
         conn.execute(
@@ -1345,6 +1375,7 @@ def _create_chore_quest(conn, project, issues):
         (quest_id, f"[chore] Code health: {project['name']}", description, "COMMON", "chore", "backlog", project["id"], project.get("language", "") or "", now)
     )
     log_activity(conn, "guild-master", f"Auto-created chore quest {quest_id} for {project['name']}", quest_id=quest_id, project_id=project["id"])
+    _explain_action("Created chore quest", f"Automated health check found issues that should be addressed: {', '.join(issues)}")
 
 
 def monitor_development_branch(conn):

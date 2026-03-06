@@ -44,5 +44,18 @@ pub fn run(description: String, project: Option<String>) -> Result<()> {
             .dimmed()
     );
 
+    let gm_pid_file = guild_dir.join("guild-master.pid");
+    if gm_pid_file.exists() {
+        println!(
+            "  {} Guild Master will pick this up on next cycle",
+            "→".dimmed()
+        );
+    } else {
+        println!(
+            "  {} Guild Master is not running. Start with: python3 agents/guild_master.py",
+            "!".yellow()
+        );
+    }
+
     Ok(())
 }

@@ -801,6 +801,8 @@ class SessionManager:
         print(f"  ! {session.hero_name}: session died (was PID {session.pid})")
         session.status = "crashed"
 
+        quest_was_active = session.quest_id is not None
+
         conn = get_db()
         try:
             conn.execute(
@@ -817,6 +819,18 @@ class SessionManager:
             )
         finally:
             conn.close()
+
+        if quest_was_active:
+            try:
+                from telegram_bot import TelegramBot
+                bot = TelegramBot()
+                if bot.token and bot.chat_id:
+                    bot.send_message(
+                        f"⚠️ Hero {session.hero_name} crashed during active quest "
+                        f"{session.quest_id}. Attempting recovery."
+                    )
+            except Exception:
+                pass
 
         del self.sessions[hero_id]
         self._attempt_recovery(hero_id, session)

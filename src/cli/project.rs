@@ -45,6 +45,51 @@ pub enum ProjectCommand {
     Health { name: String },
     /// Set up branch protection rules
     Protect { name: String },
+    /// Edit project memory file in $EDITOR
+    Edit { name: String },
+    /// Manage project MCP servers
+    #[command(subcommand)]
+    Mcp(ProjectMcpAction),
+    /// Manage project groups
+    #[command(subcommand)]
+    Group(GroupAction),
+}
+
+#[derive(Subcommand)]
+pub enum GroupAction {
+    /// Create a new project group
+    Create { name: String },
+    /// Add a project to a group
+    Add { group: String, project: String },
+    /// List all project groups
+    List,
+    /// Show projects in a group
+    Show { name: String },
+    /// Remove a project group
+    Remove { name: String },
+}
+
+#[derive(Subcommand)]
+pub enum ProjectMcpAction {
+    /// Add an MCP server to a project
+    Add {
+        /// Project name
+        project: String,
+        /// MCP server name
+        mcp: String,
+    },
+    /// Remove an MCP server from a project
+    Remove {
+        /// Project name
+        project: String,
+        /// MCP server name
+        mcp: String,
+    },
+    /// List MCP servers for a project
+    List {
+        /// Project name
+        project: String,
+    },
 }
 
 pub fn run(cmd: ProjectCommand) -> Result<()> {
@@ -68,6 +113,9 @@ pub fn run(cmd: ProjectCommand) -> Result<()> {
             Ok(())
         }
         ProjectCommand::Protect { name } => run_protect(&name),
+        ProjectCommand::Edit { name } => run_edit(&name),
+        ProjectCommand::Mcp(action) => run_mcp(action),
+        ProjectCommand::Group(action) => run_group(action),
     }
 }
 
@@ -168,10 +216,216 @@ fn run_add(
     }
     println!("  Path: {}", project_path.display());
     println!("  Branches: {} → {}", main_b, dev_b);
+
+    let _ = scan_conventions(
+        &project_path.to_string_lossy(),
+        &project_name,
+        &guild_dir,
+    );
+
     println!(
         "\n  Tip: Run {} to set up branch protection rules.",
         format!("guild project protect {}", project_name).cyan()
     );
+
+    Ok(())
+}
+
+fn run_edit(name: &str) -> Result<()> {
+    let guild_dir = db::guild_dir();
+    let project_file = guild_dir
+        .join("workspace/memory/shared/projects")
+        .join(format!("{}.md", name));
+
+    if !project_file.exists() {
+        bail!("Project memory file not found: {}", project_file.display());
+    }
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    Command::new(&editor)
+        .arg(&project_file)
+        .status()?;
+
+    println!("{} Project '{}' memory updated", "✓".green(), name.cyan());
+    Ok(())
+}
+
+fn run_mcp(action: ProjectMcpAction) -> Result<()> {
+    let conn = db::open()?;
+    match action {
+        ProjectMcpAction::Add { project, mcp } => {
+            let mcp_exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM mcp_servers WHERE name = ?1",
+                    [&mcp],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|c| c > 0)
+                .unwrap_or(false);
+
+            if !mcp_exists {
+                bail!(
+                    "MCP '{}' not found. Use `guild mcp list` to see available MCPs.",
+                    mcp
+                );
+            }
+
+            let current: String = conn
+                .query_row(
+                    "SELECT COALESCE(default_mcps, '') FROM projects WHERE name = ?1",
+                    [&project],
+                    |row| row.get(0),
+                )
+                .map_err(|_| anyhow::anyhow!("Project '{}' not found", project))?;
+
+            let mut mcps: Vec<String> = if current.is_empty() {
+                vec![]
+            } else {
+                current.split(',').map(|s| s.trim().to_string()).collect()
+            };
+
+            if !mcps.contains(&mcp) {
+                mcps.push(mcp.clone());
+            }
+
+            conn.execute(
+                "UPDATE projects SET default_mcps = ?1 WHERE name = ?2",
+                rusqlite::params![mcps.join(","), project],
+            )?;
+
+            db::log_activity(
+                &conn,
+                "system",
+                &format!("MCP '{}' attached to project '{}'", mcp, project),
+                None,
+                None,
+                "info",
+            )?;
+
+            println!(
+                "{} MCP '{}' attached to project '{}'",
+                "✓".green(),
+                mcp.cyan(),
+                project.bold()
+            );
+        }
+        ProjectMcpAction::Remove { project, mcp } => {
+            let current: String = conn
+                .query_row(
+                    "SELECT COALESCE(default_mcps, '') FROM projects WHERE name = ?1",
+                    [&project],
+                    |row| row.get(0),
+                )
+                .map_err(|_| anyhow::anyhow!("Project '{}' not found", project))?;
+
+            let mcps: Vec<String> = current
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty() && s != &mcp)
+                .collect();
+
+            conn.execute(
+                "UPDATE projects SET default_mcps = ?1 WHERE name = ?2",
+                rusqlite::params![mcps.join(","), project],
+            )?;
+
+            db::log_activity(
+                &conn,
+                "system",
+                &format!("MCP '{}' detached from project '{}'", mcp, project),
+                None,
+                None,
+                "info",
+            )?;
+
+            println!(
+                "{} MCP '{}' detached from project '{}'",
+                "✓".green(),
+                mcp.cyan(),
+                project.bold()
+            );
+        }
+        ProjectMcpAction::List { project } => {
+            let current: String = conn
+                .query_row(
+                    "SELECT COALESCE(default_mcps, '') FROM projects WHERE name = ?1",
+                    [&project],
+                    |row| row.get(0),
+                )
+                .map_err(|_| anyhow::anyhow!("Project '{}' not found", project))?;
+
+            let mcps: Vec<String> = current
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            println!(
+                "{} {}",
+                "MCP SERVERS FOR".yellow().bold(),
+                project.cyan().bold()
+            );
+            println!("{}", "─".repeat(50));
+
+            if mcps.is_empty() {
+                println!(
+                    "  No MCPs attached. Use {} to add one.",
+                    format!("guild project mcp add {} <mcp>", project).cyan()
+                );
+            } else {
+                for mcp in &mcps {
+                    println!("  {}", mcp.bold());
+                }
+                println!("\n  {} MCP(s) attached.", mcps.len());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn scan_conventions(path: &str, project_name: &str, guild_dir: &std::path::Path) -> Result<()> {
+    let conventions_dir = guild_dir.join("workspace/memory/shared/conventions");
+    std::fs::create_dir_all(&conventions_dir)?;
+    let mut found = Vec::new();
+
+    let config_files = [
+        (".editorconfig", "EditorConfig"),
+        (".eslintrc", "ESLint"),
+        (".eslintrc.json", "ESLint"),
+        (".eslintrc.js", "ESLint"),
+        (".prettierrc", "Prettier"),
+        (".prettierrc.json", "Prettier"),
+        ("tsconfig.json", "TypeScript"),
+        ("rustfmt.toml", "Rustfmt"),
+        (".rustfmt.toml", "Rustfmt"),
+        ("pyproject.toml", "Python Project"),
+        ("setup.cfg", "Python Setup"),
+        (".clippy.toml", "Clippy"),
+        ("Makefile", "Make"),
+        ("Justfile", "Just"),
+    ];
+
+    for (filename, tool_name) in &config_files {
+        let file_path = std::path::Path::new(path).join(filename);
+        if file_path.exists() {
+            found.push(format!("- {} ({})", tool_name, filename));
+        }
+    }
+
+    if !found.is_empty() {
+        let conventions_file = conventions_dir.join(format!("{}.md", project_name));
+        let content = format!(
+            "# {} Conventions\n\nDetected config files:\n{}\n",
+            project_name,
+            found.join("\n")
+        );
+        std::fs::write(&conventions_file, content)?;
+        println!(
+            "  {} Found {} convention files",
+            "→".cyan(),
+            found.len()
+        );
+    }
 
     Ok(())
 }
@@ -610,6 +864,136 @@ fn protect_gitlab(path: &str, main_branch: &str, dev_branch: &str) -> Result<()>
         );
     }
 
+    Ok(())
+}
+
+fn run_group(action: GroupAction) -> Result<()> {
+    match action {
+        GroupAction::Create { name } => run_group_create(name),
+        GroupAction::Add { group, project } => run_group_add(group, project),
+        GroupAction::List => run_group_list(),
+        GroupAction::Show { name } => run_group_show(name),
+        GroupAction::Remove { name } => run_group_remove(name),
+    }
+}
+
+fn run_group_create(name: String) -> Result<()> {
+    let conn = db::open()?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO project_groups (id, name, created_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![id, name, now],
+    )?;
+    println!("{} Created project group '{}'", "+".green(), name.cyan());
+    Ok(())
+}
+
+fn run_group_add(group: String, project: String) -> Result<()> {
+    let conn = db::open()?;
+    let group_id: String = conn
+        .query_row(
+            "SELECT id FROM project_groups WHERE name = ?1",
+            [&group],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("Group '{}' not found", group))?;
+
+    let project_id: String = conn
+        .query_row(
+            "SELECT id FROM projects WHERE name = ?1",
+            [&project],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("Project '{}' not found", project))?;
+
+    conn.execute(
+        "INSERT OR IGNORE INTO project_group_members (group_id, project_id) VALUES (?1, ?2)",
+        rusqlite::params![group_id, project_id],
+    )?;
+    println!(
+        "{} Added '{}' to group '{}'",
+        "+".green(),
+        project.cyan(),
+        group.cyan()
+    );
+    Ok(())
+}
+
+fn run_group_list() -> Result<()> {
+    let conn = db::open()?;
+    let mut stmt = conn.prepare(
+        "SELECT g.name, COUNT(m.project_id) as count \
+         FROM project_groups g \
+         LEFT JOIN project_group_members m ON g.id = m.group_id \
+         GROUP BY g.id ORDER BY g.name",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+
+    println!("{}", "PROJECT GROUPS".yellow().bold());
+    for row in rows {
+        let (name, count) = row?;
+        println!("  {} ({} projects)", name.cyan(), count);
+    }
+    Ok(())
+}
+
+fn run_group_show(name: String) -> Result<()> {
+    let conn = db::open()?;
+    let group_id: String = conn
+        .query_row(
+            "SELECT id FROM project_groups WHERE name = ?1",
+            [&name],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("Group '{}' not found", name))?;
+
+    println!("{} {}", "GROUP:".yellow().bold(), name.cyan());
+
+    let mut stmt = conn.prepare(
+        "SELECT p.name, p.language, p.status \
+         FROM projects p \
+         JOIN project_group_members m ON p.id = m.project_id \
+         WHERE m.group_id = ?1",
+    )?;
+    let rows = stmt.query_map([&group_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (pname, lang, status) = row?;
+        println!(
+            "  {} [{}] {}",
+            pname.cyan(),
+            lang.unwrap_or_default(),
+            status.dimmed()
+        );
+    }
+    Ok(())
+}
+
+fn run_group_remove(name: String) -> Result<()> {
+    let conn = db::open()?;
+    let group_id: String = conn
+        .query_row(
+            "SELECT id FROM project_groups WHERE name = ?1",
+            [&name],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("Group '{}' not found", name))?;
+
+    conn.execute(
+        "DELETE FROM project_group_members WHERE group_id = ?1",
+        [&group_id],
+    )?;
+    conn.execute("DELETE FROM project_groups WHERE id = ?1", [&group_id])?;
+    println!("{} Removed group '{}'", "-".red(), name.cyan());
     Ok(())
 }
 
