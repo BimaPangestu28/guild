@@ -57,14 +57,14 @@
 - [x] Write default shared memory templates (conventions: `git.md`, `code-style.md`, `testing.md`)
 
 ### 1.4 CLI — `guild init`
-- [ ] System requirements check: git 2.x, Python 3.11+
-- [ ] Prompt Anthropic API key, validate via API call
-- [ ] Store API key securely (encrypted local store)
+- [x] System requirements check: git 2.x, Python 3.11+
+- [x] Prompt Anthropic API key, validate via API call
+- [x] Store API key securely (encrypted local store)
 - [x] Create directory structure (1.3)
 - [x] Initialize SQLite database (1.2)
-- [ ] Optional: Telegram setup prompt (store token + chat ID)
+- [x] Optional: Telegram setup prompt (store token + chat ID)
 - [ ] Optional: License key prompt (Free tier default)
-- [ ] Optional: Recruit first hero (interactive class selection, name input)
+- [x] Optional: Recruit first hero (interactive class selection, name input)
 - [ ] Optional: Register first project (`guild project add` flow)
 - [x] Print summary dan next steps
 
@@ -280,12 +280,12 @@
 
 ### 3.8 Cost Tracking
 - [x] Track token usage per Guild Master API call
-- [ ] Track token usage per hero session
-- [ ] Track token usage per project
-- [ ] `guild cost` CLI command — today's breakdown (placeholder exists)
-- [ ] Configurable daily cap: `guild config --set cost-cap-daily {amount}`
-- [ ] Warning at 80% cap → Telegram notification
-- [ ] Auto-pause all heroes at 100% cap
+- [x] Track token usage per hero session
+- [x] Track token usage per project
+- [x] `guild cost` CLI command — today's breakdown (placeholder exists)
+- [x] Configurable daily cap: `guild config --set cost-cap-daily {amount}`
+- [x] Warning at 80% cap → Telegram notification
+- [x] Auto-pause all heroes at 100% cap
 
 ### 3.9 Circuit Breaker
 - [x] Detect stuck hero: no output + no commits > configurable threshold
@@ -315,7 +315,7 @@
 - [x] After impl complete → auto-spawn test quest (assign different hero) (Phase 3)
 - [x] After test pass → create PR → auto-spawn review quest (Phase 3)
 - [x] After review approved → mark chain done (Phase 3)
-- [ ] After review changes requested → create fix quest → assign back to implementor
+- [x] After review changes requested → create fix quest → assign back to implementor
 - [ ] Common quests (<1hr, low risk) may skip test/review — log this decision
 - [x] Enforce chain rule: no hero holds two roles in same chain (Phase 3)
 
@@ -328,10 +328,10 @@
 
 ### 4.5 Development → Main Merge
 - [ ] Guild Master monitors `development` branch
-- [ ] When ready: send Telegram merge approval request
-- [ ] Wait for `/approve {chain_id}` dari developer
-- [ ] On approve: create PR development → main, merge
-- [ ] On reject: keep on development, log reason
+- [x] When ready: send Telegram merge approval request
+- [x] Wait for `/approve {chain_id}` dari developer
+- [x] On approve: create PR development → main, merge
+- [x] On reject: keep on development, log reason
 
 ### 4.6 Multi-Repo Project Groups
 - [ ] `guild project group create {name}`
@@ -409,7 +409,7 @@
 - [x] `/pause` — pause all heroes
 - [x] `/resume` — resume all heroes
 - [x] `/approve {chain_id}` — approve dev→main merge
-- [ ] `/reject {chain_id}` — reject merge
+- [x] `/reject {chain_id}` — reject merge
 - [x] `/goal {text}` — post new goal
 - [x] `/cost` — today's usage breakdown
 - [x] `/help` — list commands
@@ -501,13 +501,13 @@
 ## Cross-Cutting (All Phases)
 
 ### Error Handling
-- [ ] FATAL: guild stops entirely, manual intervention required
-- [ ] CRITICAL: affected component pauses, Telegram Level 4 notification
-- [ ] WARNING: guild continues, logged, included in daily report
-- [ ] INFO: guild continues, logged only
-- [ ] Guild Master crash → auto-restart after 30s, re-read state from db
+- [x] FATAL: guild stops entirely, manual intervention required
+- [x] CRITICAL: affected component pauses, Telegram Level 4 notification
+- [x] WARNING: guild continues, logged, included in daily report
+- [x] INFO: guild continues, logged only
+- [x] Guild Master crash → auto-restart after 30s, re-read state from db
 - [ ] Guild Master stuck >10 min → kill and restart
-- [ ] guild.db corruption → stop, notify, restore from hourly backup
+- [x] guild.db corruption → stop, notify, restore from hourly backup
 - [ ] Hero modifies file outside project scope → revert via git, suspend hero
 - [ ] Hero attempts push to main → block (branch protection), suspend, notify
 
